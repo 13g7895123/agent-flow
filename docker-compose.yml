@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: agent-flow-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: agent_flow
+      POSTGRES_USER: agent_flow
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_flow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent-flow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agent-flow-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://agent_flow:secret@postgres:5432/agent_flow?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      RUN_SEED: "true"
+      CLAUDE_TIMEOUT: 10m
+      CLAUDE_DEFAULT_MAX_RETRIES: "5"
+      TASK_CONCURRENCY: "1"
+      ALLOW_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      # 掛載宿主機 home 目錄，讓 claude CLI 能存取本地專案
+      - /home:/home
+      # 掛載 claude config（已登入的帳號）
+      - ${HOME}/.claude:/root/.claude:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: agent-flow-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:3001
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
