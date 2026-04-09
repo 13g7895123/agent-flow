@@ -9,8 +9,11 @@ import (
 func (h *Handler) ListPipelines(c *fiber.Ctx) error {
 	rows, err := h.db.Query(c.Context(), `
 		SELECT p.id, p.name, p.description, p.fixer_agent_id, p.is_default, p.is_active, p.created_at, p.updated_at,
-		  (SELECT COUNT(*) FROM projects pr WHERE pr.pipeline_id = p.id) AS used_in_projects
-		FROM pipelines p ORDER BY p.created_at DESC`)
+		  (SELECT COUNT(*) FROM projects pr WHERE pr.pipeline_id = p.id) AS used_in_projects,
+		  a.id, a.name, a.model_provider
+		FROM pipelines p
+		JOIN agents a ON a.id = p.fixer_agent_id
+		ORDER BY p.created_at DESC`)
 	if err != nil {
 		return fiber.NewError(500, err.Error())
 	}
@@ -23,14 +26,16 @@ func (h *Handler) ListPipelines(c *fiber.Ctx) error {
 		var isDefault, isActive bool
 		var createdAt, updatedAt interface{}
 		var usedInProjects int64
-		if err := rows.Scan(&id, &name, &desc, &fixerAgentID, &isDefault, &isActive, &createdAt, &updatedAt, &usedInProjects); err != nil {
+		var faID, faName, faMP string
+		if err := rows.Scan(&id, &name, &desc, &fixerAgentID, &isDefault, &isActive, &createdAt, &updatedAt, &usedInProjects, &faID, &faName, &faMP); err != nil {
 			return fiber.NewError(500, err.Error())
 		}
-		// 取 steps
 		steps, _ := h.getPipelineSteps(c, id)
 		pipelines = append(pipelines, fiber.Map{
 			"id": id, "name": name, "description": desc,
-			"fixerAgentId": fixerAgentID, "isDefault": isDefault, "isActive": isActive,
+			"fixerAgentId": fixerAgentID,
+			"fixerAgent":   fiber.Map{"id": faID, "name": faName, "modelProvider": faMP},
+			"isDefault": isDefault, "isActive": isActive,
 			"createdAt": createdAt, "updatedAt": updatedAt,
 			"usedInProjects": usedInProjects, "steps": steps,
 		})
@@ -126,9 +131,13 @@ func (h *Handler) CreatePipeline(c *fiber.Ctx) error {
 	}
 
 	steps, _ := h.getPipelineSteps(c, id)
+	var faID, faName, faMP string
+	h.db.QueryRow(c.Context(), `SELECT id, name, model_provider FROM agents WHERE id=$1::uuid`, body.FixerAgentID).Scan(&faID, &faName, &faMP)
 	return c.Status(201).JSON(fiber.Map{
 		"id": id, "name": body.Name, "description": body.Description,
-		"fixerAgentId": body.FixerAgentID, "isDefault": false, "steps": steps,
+		"fixerAgentId": body.FixerAgentID,
+		"fixerAgent":   fiber.Map{"id": faID, "name": faName, "modelProvider": faMP},
+		"isDefault": false, "steps": steps,
 	})
 }
 
@@ -170,7 +179,14 @@ func (h *Handler) UpdatePipeline(c *fiber.Ctx) error {
 	}
 
 	steps, _ := h.getPipelineSteps(c, id)
-	return c.JSON(fiber.Map{"id": id, "name": body.Name, "fixerAgentId": body.FixerAgentID, "steps": steps})
+	var faID, faName, faMP string
+	h.db.QueryRow(c.Context(), `SELECT id, name, model_provider FROM agents WHERE id=$1::uuid`, body.FixerAgentID).Scan(&faID, &faName, &faMP)
+	return c.JSON(fiber.Map{
+		"id": id, "name": body.Name, "description": body.Description,
+		"fixerAgentId": body.FixerAgentID,
+		"fixerAgent":   fiber.Map{"id": faID, "name": faName, "modelProvider": faMP},
+		"steps": steps,
+	})
 }
 
 func (h *Handler) SetDefaultPipeline(c *fiber.Ctx) error {

@@ -41,7 +41,7 @@
 ## 目錄結構
 
 ```
-api/
+backend/
 ├── cmd/server/main.go            # 進入點：初始化 DB/Redis/Fiber/Asynq
 ├── internal/
 │   ├── config/config.go          # 環境變數讀取（PORT, DATABASE_URL, REDIS_URL...）
@@ -73,7 +73,11 @@ api/
 │       └── seed.go               # 預設 Agent + Pipeline
 ├── sqlc.yaml
 ├── go.mod
-└── .env.example
+└── Dockerfile
+.env                              # 根目錄統一管理所有環境變數與對外 PORT
+.env.example
+docker-compose.yml
+web/
 ```
 
 ---
@@ -524,22 +528,46 @@ data: {"taskId":"...","status":"done"}
 
 ---
 
-### Step 14 — .env.example + 啟動說明
+### Step 14 — 環境變數與 Docker Compose 部署 ✅
+
+根目錄 `.env`（所有對外 PORT 由此統一控管）：
 
 ```bash
-PORT=3001
-DATABASE_URL=postgres://agent_flow:secret@localhost:5432/agent_flow
-REDIS_URL=redis://localhost:6379
+# 對外 PORT
+BACKEND_PORT=9102
+WEB_PORT=9202
+POSTGRES_PORT=9302
+REDIS_PORT=9402
+
+# 後端設定
+PORT=9102
+DATABASE_URL=postgres://agent_flow:secret@localhost:9302/agent_flow?sslmode=disable
+REDIS_URL=redis://localhost:9402
 RUN_SEED=true
 CLAUDE_TIMEOUT=10m
 CLAUDE_DEFAULT_MAX_RETRIES=5
 TASK_CONCURRENCY=1
+ALLOW_ORIGINS=http://localhost:9202,http://localhost:5173
+
+# 前端設定
+VITE_API_URL=http://localhost:9102
+
+# PostgreSQL
+POSTGRES_DB=agent_flow
+POSTGRES_USER=agent_flow
+POSTGRES_PASSWORD=secret
 ```
 
+啟動方式：
+```bash
+docker compose up --build -d
+```
+
+`docker compose` 會在 container 內執行 `go mod download && go mod tidy`，不需要本機有 Go 環境。
+
 本地開發前置條件：
-1. `claude` CLI 已安裝並登入
-2. PostgreSQL 17 running（可用 `docker run postgres:17-alpine`）
-3. Redis 7 running（可用 `docker run redis:7-alpine`）
+1. `claude` CLI 已安裝並登入（掛載 `~/.claude` 進 container）
+2. Docker + Docker Compose
 
 ---
 
@@ -581,12 +609,12 @@ Step 11 ──► Step 6（handler）────────────┘
 ## Phase 2（MVP 後）
 
 1. **Gemini Runner + ShellExecutor**：實作 `runner/gemini.go`，解析 bash/diff 區塊，由 ShellExecutor 執行
-2. **Docker Compose**：postgres + redis + api + web 一鍵啟動
-3. **Prompt 變數驗證**：Handler 層驗證 stepPrompt 中的 `{變數}` 是否在允許清單
-4. **單元測試**：promptbuilder、orchestrator 狀態機、runner mock 測試
-5. **速率限制**：Asynq concurrency 設定 + per-provider 限速器
+2. **Prompt 變數驗證**：Handler 層驗證 stepPrompt 中的 `{變數}` 是否在允許清單
+3. **單元測試**：promptbuilder、orchestrator 狀態機、runner mock 測試
+4. **速率限制**：Asynq concurrency 設定 + per-provider 限速器
 
 ---
 
-*Plan 版本：1.0*  
-*對應 DESIGN.md v2.2*
+*Plan 版本：1.1*  
+*對應 DESIGN.md v2.2*  
+*更新：Docker Compose 部署完成、PORT 統一由根目錄 `.env` 控管、目錄結構修正為 `backend/`*
