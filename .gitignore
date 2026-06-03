@@ -1,0 +1,26 @@
+# Node / Bun
+node_modules/
+web/dist/
+web/.env.local
+
+# Rust
+backend-rust/target/
+
+# Go
+backend/bin/
+backend/tmp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
