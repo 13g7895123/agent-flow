@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+// ── Enums ──────────────────────────────────────────────────────────────────
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelProvider {
@@ -35,6 +37,118 @@ pub enum LogType {
     Stderr,
 }
 
+// ── Agent ──────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Agent {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub model_provider: ModelProvider,
+    pub model_id: String,
+    pub system_prompt: String,
+    pub step_prompt: String,
+    pub is_active: bool,
+    pub used_in_pipelines: u32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAgentRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub model_provider: ModelProvider,
+    pub model_id: Option<String>,
+    pub system_prompt: String,
+    pub step_prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAgentRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub model_provider: Option<ModelProvider>,
+    pub model_id: Option<String>,
+    pub system_prompt: Option<String>,
+    pub step_prompt: Option<String>,
+}
+
+// ── Pipeline ───────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineStepAgent {
+    pub id: String,
+    pub name: String,
+    pub model_provider: ModelProvider,
+    pub model_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineStep {
+    pub id: String,
+    pub agent_id: String,
+    pub agent: PipelineStepAgent,
+    pub order: u32,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineFixerAgent {
+    pub id: String,
+    pub name: String,
+    pub model_provider: ModelProvider,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pipeline {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub fixer_agent_id: String,
+    pub fixer_agent: PipelineFixerAgent,
+    pub steps: Vec<PipelineStep>,
+    pub is_default: bool,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineStepInput {
+    pub agent_id: String,
+    pub order: u32,
+    pub label: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePipelineRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub fixer_agent_id: String,
+    pub steps: Vec<PipelineStepInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePipelineRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub fixer_agent_id: Option<String>,
+    pub steps: Option<Vec<PipelineStepInput>>,
+}
+
+// ── Snapshot (used in Task) ────────────────────────────────────────────────
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
@@ -65,19 +179,7 @@ pub struct PipelineSnapshot {
     pub steps: Vec<StepSnapshot>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionRun {
-    pub id: String,
-    pub task_id: String,
-    pub step_id: Option<String>,
-    pub phase: RunPhase,
-    pub run_index: u32,
-    pub output: String,
-    pub exit_code: i32,
-    pub started_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
-}
+// ── Project ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +200,26 @@ pub struct Project {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectRequest {
+    pub name: String,
+    pub path: String,
+    pub test_command: Option<String>,
+    pub pipeline_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub path: Option<String>,
+    pub test_command: Option<String>,
+    pub pipeline_id: Option<String>,
+}
+
+// ── Task ───────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,4 +243,20 @@ pub struct Task {
 pub struct CreateTaskRequest {
     pub prompt: String,
     pub max_retries: i16,
+}
+
+// ── ExecutionRun ───────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRun {
+    pub id: String,
+    pub task_id: String,
+    pub step_id: Option<String>,
+    pub phase: RunPhase,
+    pub run_index: u32,
+    pub output: String,
+    pub exit_code: i32,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
 }
