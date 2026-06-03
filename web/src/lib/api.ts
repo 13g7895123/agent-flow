@@ -8,14 +8,37 @@ import type {
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
+function resolveErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') {
+    return fallback
+  }
+
+  const record = body as Record<string, unknown>
+  const message = record.message
+  if (typeof message === 'string' && message.trim()) return message
+
+  const error = record.error
+  if (typeof error === 'string' && error.trim()) return error
+
+  return fallback
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(err.message ?? err.error ?? 'Request failed')
+    const raw = await res.text().catch(() => '')
+    let body: unknown = raw
+    if (raw) {
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        body = raw
+      }
+    }
+    throw new Error(resolveErrorMessage(body, raw || res.statusText || 'Request failed'))
   }
   if (res.status === 204) return undefined as T
   return res.json()

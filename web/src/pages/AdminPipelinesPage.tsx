@@ -118,7 +118,7 @@ function SortableStep({
 let _keyCounter = 0
 const newKey = () => `step-${++_keyCounter}`
 
-function PipelineForm({
+export function PipelineForm({
   initial, onSubmit, loading,
 }: {
   initial?: { form: PipelineFormData; steps: StepItem[] }
