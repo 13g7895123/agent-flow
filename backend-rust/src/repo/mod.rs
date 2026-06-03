@@ -1,1 +1,3 @@
-// Repository layer will be added here
+pub mod projects;
+
+pub use projects::ProjectRepo;
