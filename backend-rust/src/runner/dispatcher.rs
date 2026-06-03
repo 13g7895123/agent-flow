@@ -19,9 +19,7 @@ impl RunnerDispatcher {
     ) -> anyhow::Result<RunResult> {
         match provider {
             ModelProvider::Claude => self.claude_runner.run(options).await,
-            ModelProvider::Gemini => {
-                Err(anyhow::anyhow!("Gemini runner not yet implemented"))
-            }
+            ModelProvider::Gemini => Err(anyhow::anyhow!("Gemini runner not yet implemented")),
         }
     }
 }

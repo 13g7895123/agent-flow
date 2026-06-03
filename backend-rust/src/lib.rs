@@ -2,6 +2,7 @@ pub mod api;
 pub mod app_state;
 pub mod config;
 pub mod domain;
+pub mod orchestrator;
 pub mod queue;
 pub mod runner;
 
@@ -33,14 +34,14 @@ pub async fn build_state_with_workers() -> Arc<AppState> {
             for i in 0..config.task_concurrency {
                 let _ = queue::TaskWorker::spawn(Arc::new(queue.clone()), state.clone(), i);
             }
-            tracing::info!(
-                "Spawned {} task workers",
-                config.task_concurrency
-            );
+            tracing::info!("Spawned {} task workers", config.task_concurrency);
             state
         }
         Err(e) => {
-            tracing::error!("Failed to initialize Redis queue: {:?}, falling back to no queue", e);
+            tracing::error!(
+                "Failed to initialize Redis queue: {:?}, falling back to no queue",
+                e
+            );
             Arc::new(state)
         }
     }

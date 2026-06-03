@@ -31,9 +31,10 @@ impl CommandTester {
         let mut child = cmd.spawn()?;
 
         let stdout_handle = {
-            let stdout = child.stdout.take().ok_or_else(|| {
-                anyhow::anyhow!("Failed to open stdout")
-            })?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to open stdout"))?;
             tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = stdout;
@@ -43,9 +44,10 @@ impl CommandTester {
         };
 
         let stderr_handle = {
-            let stderr = child.stderr.take().ok_or_else(|| {
-                anyhow::anyhow!("Failed to open stderr")
-            })?;
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to open stderr"))?;
             tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = stderr;
@@ -83,9 +85,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_command_tester_success() {
-        let result =
-            CommandTester::test_command("echo 'test'", &PathBuf::from("/tmp"), Duration::from_secs(1))
-                .await;
+        let result = CommandTester::test_command(
+            "echo 'test'",
+            &PathBuf::from("/tmp"),
+            Duration::from_secs(1),
+        )
+        .await;
 
         assert!(result.is_ok());
         let test_result = result.unwrap();

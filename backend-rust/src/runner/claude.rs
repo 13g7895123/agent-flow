@@ -42,9 +42,10 @@ impl ClaudeRunner {
         let mut child = cmd.spawn()?;
 
         let stdout_handle = {
-            let stdout = child.stdout.take().ok_or_else(|| {
-                anyhow::anyhow!("Failed to open stdout")
-            })?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to open stdout"))?;
             tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = stdout;
@@ -54,9 +55,10 @@ impl ClaudeRunner {
         };
 
         let stderr_handle = {
-            let stderr = child.stderr.take().ok_or_else(|| {
-                anyhow::anyhow!("Failed to open stderr")
-            })?;
+            let stderr = child
+                .stderr
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("Failed to open stderr"))?;
             tokio::spawn(async move {
                 let mut buf = String::new();
                 let mut reader = stderr;
@@ -72,7 +74,10 @@ impl ClaudeRunner {
             Ok(Err(e)) => return Err(anyhow::anyhow!("Process error: {}", e)),
             Err(_) => {
                 let _ = child.kill().await;
-                return Err(anyhow::anyhow!("Process timeout after {:?}", options.timeout));
+                return Err(anyhow::anyhow!(
+                    "Process timeout after {:?}",
+                    options.timeout
+                ));
             }
         };
 

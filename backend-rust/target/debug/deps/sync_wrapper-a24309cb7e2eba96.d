@@ -1,7 +1,0 @@
-/home/jarvis/project/idea/39_agent-flow/backend-rust/target/debug/deps/libsync_wrapper-a24309cb7e2eba96.rmeta: /home/jarvis/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sync_wrapper-0.1.2/src/lib.rs
-
-/home/jarvis/project/idea/39_agent-flow/backend-rust/target/debug/deps/libsync_wrapper-a24309cb7e2eba96.rlib: /home/jarvis/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sync_wrapper-0.1.2/src/lib.rs
-
-/home/jarvis/project/idea/39_agent-flow/backend-rust/target/debug/deps/sync_wrapper-a24309cb7e2eba96.d: /home/jarvis/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sync_wrapper-0.1.2/src/lib.rs
-
-/home/jarvis/.cargo/registry/src/index.crates.io-6f17d22bba15001f/sync_wrapper-0.1.2/src/lib.rs:

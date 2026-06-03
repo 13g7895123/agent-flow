@@ -177,12 +177,24 @@ impl AppState {
     pub async fn update_agent(&self, id: &str, req: UpdateAgentRequest) -> Option<Agent> {
         let mut store = self.store.lock().await;
         let agent = store.agents.get_mut(id)?;
-        if let Some(v) = req.name { agent.name = v; }
-        if let Some(v) = req.description { agent.description = v; }
-        if let Some(v) = req.model_provider { agent.model_provider = v; }
-        if let Some(v) = req.model_id { agent.model_id = v; }
-        if let Some(v) = req.system_prompt { agent.system_prompt = v; }
-        if let Some(v) = req.step_prompt { agent.step_prompt = v; }
+        if let Some(v) = req.name {
+            agent.name = v;
+        }
+        if let Some(v) = req.description {
+            agent.description = v;
+        }
+        if let Some(v) = req.model_provider {
+            agent.model_provider = v;
+        }
+        if let Some(v) = req.model_id {
+            agent.model_id = v;
+        }
+        if let Some(v) = req.system_prompt {
+            agent.system_prompt = v;
+        }
+        if let Some(v) = req.step_prompt {
+            agent.step_prompt = v;
+        }
         agent.updated_at = Utc::now();
         Some(agent.clone())
     }
@@ -274,8 +286,12 @@ impl AppState {
     pub async fn update_pipeline(&self, id: &str, req: UpdatePipelineRequest) -> Option<Pipeline> {
         let mut store = self.store.lock().await;
         let pipeline = store.pipelines.get_mut(id)?;
-        if let Some(v) = req.name { pipeline.name = v; }
-        if let Some(v) = req.description { pipeline.description = v; }
+        if let Some(v) = req.name {
+            pipeline.name = v;
+        }
+        if let Some(v) = req.description {
+            pipeline.description = v;
+        }
         if let Some(fixer_id) = req.fixer_agent_id {
             if let Some(a) = store.agents.get(&fixer_id).cloned() {
                 let p = store.pipelines.get_mut(id).unwrap();
@@ -383,13 +399,22 @@ impl AppState {
             if let Some(p) = store.pipelines.get(pipeline_id).cloned() {
                 let proj = store.projects.get_mut(id)?;
                 proj.pipeline_id = p.id.clone();
-                proj.pipeline = ProjectPipeline { id: p.id, name: p.name };
+                proj.pipeline = ProjectPipeline {
+                    id: p.id,
+                    name: p.name,
+                };
             }
         }
         let proj = store.projects.get_mut(id)?;
-        if let Some(v) = req.name { proj.name = v; }
-        if let Some(v) = req.path { proj.path = v; }
-        if let Some(v) = req.test_command { proj.test_command = v; }
+        if let Some(v) = req.name {
+            proj.name = v;
+        }
+        if let Some(v) = req.path {
+            proj.path = v;
+        }
+        if let Some(v) = req.test_command {
+            proj.test_command = v;
+        }
         proj.updated_at = Utc::now();
         Some(proj.clone())
     }

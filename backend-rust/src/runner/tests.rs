@@ -33,12 +33,9 @@ async fn test_claude_runner_error_handling() {
 
 #[tokio::test]
 async fn test_command_tester_with_valid_command() {
-    let result = CommandTester::test_command(
-        "echo hello",
-        &PathBuf::from("/tmp"),
-        Duration::from_secs(5),
-    )
-    .await;
+    let result =
+        CommandTester::test_command("echo hello", &PathBuf::from("/tmp"), Duration::from_secs(5))
+            .await;
 
     assert!(result.is_ok());
     let test_result = result.unwrap();

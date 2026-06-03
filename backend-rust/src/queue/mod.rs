@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use redis::{aio::ConnectionManager, AsyncCommands};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPayload {
@@ -24,18 +23,12 @@ impl TaskQueue {
     pub async fn enqueue(&self, task_id: String) -> Result<()> {
         let payload = TaskPayload { task_id };
         let json = serde_json::to_string(&payload)?;
-        self.redis
-            .clone()
-            .rpush("agent_flow:tasks", &json)
-            .await?;
+        let _: i64 = self.redis.clone().rpush("agent_flow:tasks", &json).await?;
         Ok(())
     }
 
     pub async fn dequeue(&self) -> Result<Option<TaskPayload>> {
-        let json: Option<String> = self.redis
-            .clone()
-            .lpop("agent_flow:tasks", None)
-            .await?;
+        let json: Option<String> = self.redis.clone().lpop("agent_flow:tasks", None).await?;
 
         match json {
             Some(j) => {
@@ -47,13 +40,15 @@ impl TaskQueue {
     }
 
     pub async fn blpop(&self, timeout_secs: u64) -> Result<Option<TaskPayload>> {
-        let json: Option<String> = self.redis
+        // BLPOP 回傳 (list_key, value)，逾時則為空。
+        let popped: Option<(String, String)> = self
+            .redis
             .clone()
-            .blpop("agent_flow:tasks", timeout_secs)
+            .blpop("agent_flow:tasks", timeout_secs as f64)
             .await?;
 
-        match json {
-            Some(j) => {
+        match popped {
+            Some((_, j)) => {
                 let payload = serde_json::from_str(&j)?;
                 Ok(Some(payload))
             }
@@ -62,25 +57,24 @@ impl TaskQueue {
     }
 
     pub async fn queue_len(&self) -> Result<usize> {
-        let len = self.redis.clone().llen("agent_flow:tasks").await?;
+        let len: usize = self.redis.clone().llen("agent_flow:tasks").await?;
         Ok(len)
     }
 }
 
 pub struct TaskWorker {
+    // 保留 queue 參考供 worker 生命週期管理（後續可用於監控/重新入佇列）。
+    #[allow(dead_code)]
     queue: Arc<TaskQueue>,
     pub handle: tokio::task::JoinHandle<()>,
 }
 
 impl TaskWorker {
-    pub fn spawn(
-        queue: Arc<TaskQueue>,
-        app_state: crate::AppState,
-        worker_id: usize,
-    ) -> Self {
+    pub fn spawn(queue: Arc<TaskQueue>, app_state: Arc<crate::AppState>, worker_id: usize) -> Self {
+        let worker_queue = queue.clone();
         let handle = tokio::spawn(async move {
             loop {
-                match queue.blpop(5).await {
+                match worker_queue.blpop(5).await {
                     Ok(Some(payload)) => {
                         tracing::info!("Worker {} processing task {}", worker_id, payload.task_id);
                         if let Err(e) = process_task(&app_state, &payload.task_id).await {
@@ -125,5 +119,29 @@ async fn process_task(state: &crate::AppState, task_id: &str) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("Task {} not found", task_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskPayload;
+
+    #[test]
+    fn encodes_and_decodes_task_payload() {
+        let payload = TaskPayload {
+            task_id: "task-1".to_string(),
+        };
+
+        let encoded = serde_json::to_string(&payload).expect("payload should encode");
+        assert_eq!(encoded, r#"{"task_id":"task-1"}"#);
+
+        let decoded: TaskPayload = serde_json::from_str(&encoded).expect("payload should decode");
+        assert_eq!(decoded.task_id, "task-1");
+    }
+
+    #[test]
+    fn rejects_invalid_payload_json() {
+        let decoded: serde_json::Result<TaskPayload> = serde_json::from_str(r#"{"task_id":1}"#);
+        assert!(decoded.is_err());
     }
 }
