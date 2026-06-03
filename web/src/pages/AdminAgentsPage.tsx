@@ -43,7 +43,7 @@ function PromptVariableHint({ onClick }: { onClick: (v: string) => void }) {
 
 // ── Agent Form ─────────────────────────────────────────────────────────────
 
-function AgentForm({
+export function AgentForm({
   initial, onSubmit, loading,
 }: {
   initial?: AgentFormData

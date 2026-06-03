@@ -13,7 +13,7 @@ import type { Project, ProjectFormData } from '@/types'
 
 const defaultForm: ProjectFormData = { name: '', path: '', testCommand: '', pipelineId: '' }
 
-function ProjectForm({
+export function ProjectForm({
   initial, onSubmit, loading,
 }: {
   initial?: ProjectFormData
