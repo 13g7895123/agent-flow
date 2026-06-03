@@ -4,6 +4,30 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+func (h *Handler) GetAgent(c *fiber.Ctx) error {
+	id := c.Params("id")
+	row := h.db.QueryRow(c.Context(), `
+		SELECT a.id, a.name, a.description, a.system_prompt, a.step_prompt,
+		       a.model_provider, a.model_id, a.is_active, a.created_at, a.updated_at,
+		       (SELECT COUNT(*) FROM pipeline_steps ps WHERE ps.agent_id = a.id) AS used_in_pipelines
+		FROM agents a WHERE a.id=$1::uuid`, id)
+
+	var aid, name, desc, sp, stp, mp, mi string
+	var isActive bool
+	var createdAt, updatedAt interface{}
+	var usedInPipelines int64
+	if err := row.Scan(&aid, &name, &desc, &sp, &stp, &mp, &mi, &isActive, &createdAt, &updatedAt, &usedInPipelines); err != nil {
+		return fiber.NewError(404, "agent not found")
+	}
+	return c.JSON(fiber.Map{
+		"id": aid, "name": name, "description": desc,
+		"systemPrompt": sp, "stepPrompt": stp,
+		"modelProvider": mp, "modelId": mi,
+		"isActive": isActive, "createdAt": createdAt, "updatedAt": updatedAt,
+		"usedInPipelines": usedInPipelines,
+	})
+}
+
 func (h *Handler) ListAgents(c *fiber.Ctx) error {
 	rows, err := h.db.Query(c.Context(), `
 		SELECT a.id, a.name, a.description, a.system_prompt, a.step_prompt,

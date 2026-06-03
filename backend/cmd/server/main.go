@@ -125,12 +125,14 @@ func main() {
 	api := app.Group("/api")
 
 	api.Get("/agents", h.ListAgents)
+	api.Get("/agents/:id", h.GetAgent)
 	api.Post("/agents", h.CreateAgent)
 	api.Put("/agents/:id", h.UpdateAgent)
 	api.Put("/agents/:id/toggle", h.ToggleAgent)
 	api.Delete("/agents/:id", h.DeleteAgent)
 
 	api.Get("/pipelines", h.ListPipelines)
+	api.Get("/pipelines/:id", h.GetPipeline)
 	api.Post("/pipelines", h.CreatePipeline)
 	api.Put("/pipelines/:id", h.UpdatePipeline)
 	api.Put("/pipelines/:id/default", h.SetDefaultPipeline)
@@ -145,6 +147,7 @@ func main() {
 	api.Get("/projects/:projectId/tasks", h.ListTasks)
 	api.Post("/projects/:projectId/tasks", h.CreateTask)
 	api.Get("/tasks/:id", h.GetTask)
+	api.Get("/tasks/:id/runs", h.GetTaskRuns)
 	api.Put("/tasks/:id/cancel", h.CancelTask)
 	api.Put("/tasks/:id/retry", h.RetryTask)
 	api.Get("/tasks/:id/stream", h.StreamTask)

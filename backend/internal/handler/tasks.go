@@ -180,3 +180,34 @@ func (h *Handler) RetryTask(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"id": tid, "status": "pending"})
 }
+
+func (h *Handler) GetTaskRuns(c *fiber.Ctx) error {
+	taskID := c.Params("id")
+	rows, err := h.db.Query(c.Context(), `
+		SELECT id, task_id, step_id, phase, output, started_at, completed_at, created_at
+		FROM execution_runs
+		WHERE task_id=$1::uuid
+		ORDER BY created_at ASC`, taskID)
+	if err != nil {
+		return fiber.NewError(500, err.Error())
+	}
+	defer rows.Close()
+
+	var runs []fiber.Map
+	for rows.Next() {
+		var id, tid, stepID, phase, output string
+		var startedAt, completedAt, createdAt interface{}
+		if err := rows.Scan(&id, &tid, &stepID, &phase, &output, &startedAt, &completedAt, &createdAt); err != nil {
+			return fiber.NewError(500, err.Error())
+		}
+		runs = append(runs, fiber.Map{
+			"id": id, "taskId": tid, "stepId": stepID, "phase": phase,
+			"output": output, "startedAt": startedAt, "completedAt": completedAt,
+			"createdAt": createdAt,
+		})
+	}
+	if runs == nil {
+		runs = []fiber.Map{}
+	}
+	return c.JSON(runs)
+}

@@ -6,6 +6,36 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+func (h *Handler) GetPipeline(c *fiber.Ctx) error {
+	id := c.Params("id")
+	row := h.db.QueryRow(c.Context(), `
+		SELECT p.id, p.name, p.description, p.fixer_agent_id, p.is_default, p.is_active, p.created_at, p.updated_at,
+		  (SELECT COUNT(*) FROM projects pr WHERE pr.pipeline_id = p.id) AS used_in_projects,
+		  a.id, a.name, a.model_provider
+		FROM pipelines p
+		JOIN agents a ON a.id = p.fixer_agent_id
+		WHERE p.id=$1::uuid`, id)
+
+	var pid, name, fixerAgentID string
+	var desc *string
+	var isDefault, isActive bool
+	var createdAt, updatedAt interface{}
+	var usedInProjects int64
+	var faID, faName, faMP string
+	if err := row.Scan(&pid, &name, &desc, &fixerAgentID, &isDefault, &isActive, &createdAt, &updatedAt, &usedInProjects, &faID, &faName, &faMP); err != nil {
+		return fiber.NewError(404, "pipeline not found")
+	}
+	steps, _ := h.getPipelineSteps(c, id)
+	return c.JSON(fiber.Map{
+		"id": pid, "name": name, "description": desc,
+		"fixerAgentId": fixerAgentID,
+		"fixerAgent":   fiber.Map{"id": faID, "name": faName, "modelProvider": faMP},
+		"isDefault": isDefault, "isActive": isActive,
+		"createdAt": createdAt, "updatedAt": updatedAt,
+		"usedInProjects": usedInProjects, "steps": steps,
+	})
+}
+
 func (h *Handler) ListPipelines(c *fiber.Ctx) error {
 	rows, err := h.db.Query(c.Context(), `
 		SELECT p.id, p.name, p.description, p.fixer_agent_id, p.is_default, p.is_active, p.created_at, p.updated_at,
