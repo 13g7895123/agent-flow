@@ -13,7 +13,8 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    store: Arc<Mutex<Store>>,
+    pub store: Arc<Mutex<Store>>,
+    pub queue: Arc<Option<crate::queue::TaskQueue>>,
 }
 
 struct Store {
@@ -120,7 +121,13 @@ impl AppState {
                 runs: HashMap::new(),
                 next_seq: 10,
             })),
+            queue: Arc::new(None),
         }
+    }
+
+    pub fn with_queue(mut self, queue: crate::queue::TaskQueue) -> Self {
+        self.queue = Arc::new(Some(queue));
+        self
     }
 
     // ── Agents ────────────────────────────────────────────────────────────
@@ -515,5 +522,21 @@ impl AppState {
     pub async fn list_runs(&self, task_id: &str) -> Option<Vec<ExecutionRun>> {
         let store = self.store.lock().await;
         store.runs.get(task_id).cloned()
+    }
+
+    pub async fn update_task_status(&self, id: &str, status: TaskStatus) {
+        let mut store = self.store.lock().await;
+        if let Some(task) = store.tasks.get_mut(id) {
+            task.status = status;
+            task.updated_at = Utc::now();
+        }
+    }
+
+    pub async fn set_task_completed(&self, id: &str, completed_at: Option<chrono::DateTime<Utc>>) {
+        let mut store = self.store.lock().await;
+        if let Some(task) = store.tasks.get_mut(id) {
+            task.completed_at = completed_at;
+            task.updated_at = Utc::now();
+        }
     }
 }

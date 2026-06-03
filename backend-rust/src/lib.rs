@@ -2,6 +2,8 @@ pub mod api;
 pub mod app_state;
 pub mod config;
 pub mod domain;
+pub mod queue;
+pub mod runner;
 
 use std::sync::Arc;
 
@@ -9,6 +11,7 @@ use api::router;
 use app_state::AppState;
 use axum::Router;
 use config::Config;
+use queue::TaskQueue;
 
 pub fn build_app(state: Arc<AppState>) -> Router {
     router(state)
@@ -16,6 +19,31 @@ pub fn build_app(state: Arc<AppState>) -> Router {
 
 pub fn build_state() -> Arc<AppState> {
     Arc::new(AppState::new(Config::from_env()))
+}
+
+pub async fn build_state_with_workers() -> Arc<AppState> {
+    let config = Config::from_env();
+    let mut state = AppState::new(config.clone());
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost".to_string());
+
+    match TaskQueue::new(&redis_url).await {
+        Ok(queue) => {
+            state = state.with_queue(queue.clone());
+            let state = Arc::new(state);
+            for i in 0..config.task_concurrency {
+                let _ = queue::TaskWorker::spawn(Arc::new(queue.clone()), state.clone(), i);
+            }
+            tracing::info!(
+                "Spawned {} task workers",
+                config.task_concurrency
+            );
+            state
+        }
+        Err(e) => {
+            tracing::error!("Failed to initialize Redis queue: {:?}, falling back to no queue", e);
+            Arc::new(state)
+        }
+    }
 }
 
 #[cfg(test)]

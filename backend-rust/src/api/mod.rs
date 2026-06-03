@@ -234,11 +234,17 @@ async fn create_task(
     if payload.prompt.trim().is_empty() {
         return Err(bad_request("Prompt is required"));
     }
-    state
-        .create_task(&project_id, payload)
-        .await
-        .map(|t| (StatusCode::CREATED, Json(t)))
-        .ok_or_else(|| not_found("Project not found"))
+    match state.create_task(&project_id, payload).await {
+        Some(task) => {
+            if let Some(Some(queue)) = state.queue.as_ref().as_ref() {
+                if let Err(e) = queue.enqueue(task.id.clone()).await {
+                    tracing::error!("Failed to enqueue task {}: {:?}", task.id, e);
+                }
+            }
+            Ok((StatusCode::CREATED, Json(task)))
+        }
+        None => Err(not_found("Project not found"))
+    }
 }
 
 async fn cancel_task(
