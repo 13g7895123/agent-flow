@@ -1216,6 +1216,58 @@ pub trait ModelRunner {
 - Phase 3 之後不要整個 phase 硬切給同一個人，應該拆成「API/資料」、「執行引擎」、「前端體驗」、「測試」四條線。
 - Phase 10 只能最後做。不要一開始就刪 Go 後端；先讓 Rust 後端在不同 port 跑，等 API、SSE、runs、logs、cancel、retry 都對齊後再切換。
 
+### 指派方式
+
+之後可以直接用工作包 ID 指派，例如：
+
+```text
+請執行 W1-TA
+請執行 Wave 2 的 Track C
+請先做 W3-TB，完成後不要碰 W3-TA
+請檢查 W4-TC 是否完成
+```
+
+工作包 ID 規則：
+
+- `W0` 代表 Wave 0。
+- `W1-TA` 代表 Wave 1 Track A。
+- `W2-TE` 代表 Wave 2 Track E。
+- `W6` 代表 Wave 6，因為正式切換不拆平行 Track。
+
+每個工作包都應該遵守：
+
+- 只做指定工作包範圍內的檔案與功能。
+- 開始前先確認該工作包的前置條件。
+- 完成後回報修改檔案、驗證指令、未完成風險。
+- 不要順手做下一個 Track，除非被明確指定。
+
+### 工作包索引
+
+| ID | 名稱 | 前置條件 | 主要交付物 | 驗證 |
+| --- | --- | --- | --- | --- |
+| W0 | 建立基準 | 無 | 現況 build/test 基準 | `web` build、Go test |
+| W1-TA | API Contract / Go 補缺口 | W0 | Go route/handler 補齊、錯誤格式統一、前端 request error parsing | `bun run build`、`go test ./...` |
+| W1-TB | Rust Skeleton | W0 | `backend-rust`、config、app state、Axum server、health endpoint | `cargo fmt`、`cargo check`、`GET /api/health` |
+| W1-TC | 測試基礎架構 | W0 | Vitest setup、MSW setup、Rust test skeleton | 測試指令可執行 |
+| W2-TA | Agent CRUD | W1-TA、W1-TB | Agent domain/DTO/repo/handler | `cargo check`、Agent API curl |
+| W2-TB | Pipeline CRUD | W1-TA、W1-TB | Pipeline domain/DTO/repo/handler | `cargo check`、Pipeline API curl |
+| W2-TC | Project CRUD | W1-TA、W1-TB | Project domain/DTO/repo/handler | `cargo check`、Project API curl |
+| W2-TD | Task CRUD 最小版 | W2-TA、W2-TB、W2-TC | Task domain/DTO/repo/handler，`POST /tasks` 只建立 pending | `cargo check`、Tasks 頁看到 pending |
+| W2-TE | 前端 Mock / Component Tests | W1-TA、W1-TC | MSW handlers、API client tests、表單/Badge/loading/error tests | `bun test`、`bun run build` |
+| W3-TA | Queue / Worker | W2-TD | Redis queue、enqueue、worker loop、最小 `pending -> running -> done` | `cargo check`、新增 task 後狀態完成 |
+| W3-TB | Claude Runner | W2-TD | `ModelRunner`、`ClaudeRunner`、stdout/stderr reader、timeout | Rust unit tests、手動 runner 測試 |
+| W3-TC | SSE Publisher / Stream | W2-TD | Redis pub/sub、SSE publisher、`GET /api/tasks/:id/stream` | SSE curl/manual test |
+| W3-TD | Rust Unit Tests | W1-TB | config、queue payload、status transition、runner option tests | `cargo test` |
+| W4-TA | 完整 Orchestrator | W3-TA、W3-TB、W3-TC | step/fix/verification、test command、retry、cancel | 成功/修正/失敗/取消路徑手測 |
+| W4-TB | Runs / Logs API | W3-TB、W3-TC | `GET /api/tasks/:id/runs`、`GET /api/runs/:runId/logs` | API curl、重新整理後 logs 仍存在 |
+| W4-TC | Task Detail UI | W4-TB | `/tasks/:id`、run timeline、log viewer、live/historical logs | `bun run build`、頁面手測 |
+| W4-TD | Playwright 草稿 | W2-TE | 建 Agent/Pipeline/Project/Task、任務詳情 skeleton | Playwright 可啟動 |
+| W5-TA | Settings Backend | W1-TB | health/runtime config、DB/Redis/Claude/Gemini 狀態 | API curl |
+| W5-TB | Settings Frontend | W5-TA | `/admin/settings`、health/config/provider cards、sidebar entry | `bun run build`、頁面手測 |
+| W5-TC | 前端可用性 | W2-TE | form error summary、ApiErrorAlert、toast、skeleton、mobile task list、DnD a11y | `bun run build`、component tests |
+| W5-TD | CI / E2E 完整化 | W3-TD、W4-TD | GitHub Actions、lint/build/test/clippy/docker compose build、E2E 成功/錯誤路徑 | CI dry run 或本機對應指令 |
+| W6 | 正式切換 Rust 後端 | W0-W5 全部交會點完成 | docker compose 切 Rust、前端指向 Rust、Go legacy、文件更新 | 完整手動驗收 |
+
 ### Wave 0：建立基準
 
 必做：
