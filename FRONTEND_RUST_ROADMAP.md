@@ -1207,14 +1207,290 @@ pub trait ModelRunner {
 
 ---
 
-## 5. 建議執行順序
+## 5. 平行執行版本
 
-最務實順序：
+原則：
 
-1. 先做 Phase 1，修好現有 API contract。
-2. 再做 Phase 2 和 Phase 3，讓 Rust 後端能支援 CRUD。
-3. 再做 Phase 4 到 Phase 6，讓 Rust 後端支援任務執行。
-4. 再做 Phase 7 到 Phase 8，補前端體驗。
-5. 最後做 Phase 9 和 Phase 10，測試與正式切換。
+- Phase 0 必須最先完成，因為它是前端 build、Go test、資料庫與 Redis 的基準。
+- Phase 1 和 Phase 2 可以同步開始：Phase 1 固定 API contract，Phase 2 建 Rust 骨架。
+- Phase 3 之後不要整個 phase 硬切給同一個人，應該拆成「API/資料」、「執行引擎」、「前端體驗」、「測試」四條線。
+- Phase 10 只能最後做。不要一開始就刪 Go 後端；先讓 Rust 後端在不同 port 跑，等 API、SSE、runs、logs、cancel、retry 都對齊後再切換。
 
-不要一開始就刪 Go 後端。先讓 Rust 後端在旁邊跑，等 API 與任務執行都對齊後再切換，風險最低。
+### Wave 0：建立基準
+
+必做：
+
+- Phase 0：保護現況與建立基準。
+
+不可平行：
+
+- 這一階段不要同時大改功能。先確定目前版本能 build、能 test，後面才知道 Rust 重寫有沒有退步。
+
+交付標準：
+
+- `web` build 通過。
+- Go backend test 通過。
+- 已確認目前工作樹狀態。
+
+### Wave 1：Contract 與 Rust 骨架同步
+
+可以平行：
+
+- Track A：Phase 1，補齊前端與現有 Go 後端 API 缺口。
+- Track B：Phase 2，建立 Rust 後端骨架。
+- Track C：Phase 9 的前置測試工作，先建立 Vitest / MSW / Rust test 基本架構，但不要急著寫完整 E2E。
+
+Track A 工作：
+
+- 統一 `web/src/lib/api.ts` 會呼叫的 API 清單。
+- 補 Go route / handler 缺口。
+- 統一錯誤格式，至少讓前端同時支援 `message` 和 `error`。
+
+Track B 工作：
+
+- 建立 `backend-rust`。
+- 建立 `Config`、`AppState`、Axum server。
+- 提供最小 `GET /api/health`。
+
+Track C 工作：
+
+- 建立測試指令和基本 setup。
+- 建 MSW handler 的空架構，先依 Phase 1 的 API contract 命名。
+
+交會點：
+
+- Phase 1 的 API contract 要成為 Rust Phase 3 的實作依據。
+- Rust health endpoint 可啟動。
+- 前端 request error handling 已對齊。
+
+### Wave 2：Rust CRUD 與前端 Mock 測試
+
+可以平行：
+
+- Track A：Phase 3 的 Agent CRUD。
+- Track B：Phase 3 的 Pipeline CRUD。
+- Track C：Phase 3 的 Project CRUD。
+- Track D：Phase 3 的 Task CRUD 最小版。
+- Track E：Phase 9 的 MSW / component tests。
+
+建議拆法：
+
+- 先共同完成 domain enums、共用 DTO、error handling、repo module layout。
+- Agent、Pipeline、Project 可以平行做。
+- Task 建議稍晚開始，因為 Task 會連到 queue、runs、logs、status transition。
+
+Track E 可以先測：
+
+- API client error parsing。
+- Agent / Pipeline / Project 表單。
+- Badge 狀態顯示。
+- 空列表、loading、mutation error UI。
+
+暫時不要做：
+
+- 不要在這個 wave 實作真正 Claude 執行。
+- 不要在這個 wave 要求 Task 完整跑完 pipeline；`POST /tasks` 先能建立 pending 即可。
+
+交會點：
+
+- 前端 Projects / Agents / Pipelines 頁面可接 Rust CRUD。
+- 前端 Tasks 頁可看到 pending task。
+- Rust `cargo check` 通過。
+- MSW mock API 與真實 API route 命名一致。
+
+### Wave 3：Queue、Runner、SSE 分工
+
+可以平行：
+
+- Track A：Phase 4，Rust Queue 與 Worker。
+- Track B：Phase 5 的 `ClaudeRunner`。
+- Track C：Phase 5 的 `SsePublisher` 與 stream handler。
+- Track D：Phase 9 的 Rust 單元測試。
+
+Track A 工作：
+
+- `TaskQueue`。
+- Redis list enqueue。
+- worker loop。
+- 最小 orchestrator：`pending -> running -> done`。
+- concurrency 設定。
+
+Track B 工作：
+
+- `ModelRunner` trait。
+- `ClaudeRunner`。
+- stdout / stderr async reader。
+- process timeout 基礎處理。
+
+Track C 工作：
+
+- Redis pub/sub publisher。
+- `GET /api/tasks/:id/stream`。
+- SSE event 格式。
+
+Track D 可以先測：
+
+- config parser。
+- queue payload encode/decode。
+- status transition helper。
+- runner command option builder。
+
+依賴提醒：
+
+- Track B 和 C 可以先用 fake task/run 測。
+- 真正串起「建立 task -> worker -> runner -> SSE」時，需要 Track A、B、C 合併。
+
+交會點：
+
+- 新增任務後狀態會從 pending 到 running 到 done。
+- Claude CLI 可以被呼叫。
+- 前端可看到 live stdout/stderr。
+- Claude 執行失敗時 task 會 failed。
+
+### Wave 4：完整 Orchestrator 與任務詳情
+
+可以平行：
+
+- Track A：Phase 6，完整 Orchestrator 狀態機。
+- Track B：Phase 7 的後端 runs/logs API。
+- Track C：Phase 7 的前端 TaskDetailPage / ExecutionRunsPanel / LogViewer。
+- Track D：Phase 9 的 Playwright 測試草稿。
+
+Track A 工作：
+
+- pipeline snapshot 讀取。
+- step/fix/verification 狀態流程。
+- test command。
+- max retries。
+- cancel token 與 child process kill。
+
+Track B 工作：
+
+- `GET /api/tasks/:id/runs`。
+- `GET /api/runs/:runId/logs`。
+- run/log response DTO。
+
+Track C 工作：
+
+- `/tasks/:id` route。
+- 任務 header、prompt、pipeline snapshot、step output。
+- 歷史 run timeline。
+- stdout/stderr log viewer。
+- 執行中任務 live log，完成任務 historical log。
+
+Track D 可以先寫：
+
+- 建立 Agent / Pipeline / Project / Task 成功路徑。
+- 任務詳情頁可重新整理。
+- log panel 基本顯示。
+
+依賴提醒：
+
+- Track C 可以先用 MSW 開發，但最終驗收必須接 Track B 的真 API。
+- Playwright 可以先寫 skeleton，等 Orchestrator 穩定後再補 assert。
+
+交會點：
+
+- 成功路徑：step -> verifying -> done。
+- 失敗修正路徑：step -> verifying -> fixing -> verifying -> done。
+- 超過重試後 failed。
+- 取消後 cancelled。
+- 重新整理任務詳情頁後仍可看到 runs 和 logs。
+
+### Wave 5：Settings、可用性、CI 收斂
+
+可以平行：
+
+- Track A：Phase 8，Rust health / runtime config API。
+- Track B：Phase 8，前端 SettingsPage。
+- Track C：F-004 / F-009 類前端可用性項目。
+- Track D：Phase 9，CI 和 E2E 完整化。
+
+Track A 工作：
+
+- DB ping。
+- Redis ping。
+- Claude CLI 檢查。
+- Gemini API key 是否設定。
+- runtime config response，不回傳 secret 原文。
+
+Track B 工作：
+
+- `/admin/settings`。
+- HealthCheckCard。
+- RuntimeConfigCard。
+- ProviderConfigCard。
+- Sidebar 設定入口。
+
+Track C 可做：
+
+- 表單錯誤總覽。
+- mutation error alert。
+- loading skeleton。
+- toast。
+- mobile task list。
+- Pipeline DnD 無障礙提示。
+
+Track D 工作：
+
+- `web lint`。
+- `web build`。
+- `rust fmt`。
+- `rust clippy`。
+- `rust test`。
+- `docker compose build`。
+- Playwright 成功路徑和錯誤路徑。
+
+交會點：
+
+- 使用者能從設定頁看出 backend/db/redis/claude/gemini 狀態。
+- CI 能在 API contract 或主要流程壞掉時失敗。
+- 前端主要 mutation 都有清楚成功/失敗回饋。
+
+### Wave 6：正式切換 Rust 後端
+
+必須最後做：
+
+- Phase 10：切換 Rust 後端成正式後端。
+
+步驟：
+
+1. `docker-compose.yml` 新增 `backend-rust` service。
+2. Go 和 Rust 先用不同 port。
+3. 前端 `.env` 先指向 Rust port。
+4. 完整手動測試：
+
+   ```text
+   建 Agent
+   建 Pipeline
+   建 Project
+   建 Task
+   看 SSE log
+   取消 Task
+   重試 failed Task
+   看 task runs
+   看 run logs
+   看 settings health
+   ```
+
+5. 沒問題後，把 Rust port 改回主要後端 port。
+6. Go backend service 移除或標成 legacy。
+7. 更新 `README.md`、`DESIGN.md`、`plan.md`。
+
+完成標準：
+
+- `docker compose up` 預設啟動 Rust 後端。
+- 前端全部功能使用 Rust API。
+- Go 後端不再是主要執行路徑。
+
+### 總覽表
+
+| Wave | 可平行 Track | 主要 Phase | 阻塞條件 | 交付物 |
+| --- | --- | --- | --- | --- |
+| Wave 0 | 無 | Phase 0 | 無 | 現況基準 |
+| Wave 1 | Contract / Rust skeleton / test setup | Phase 1, 2, 9 前置 | Phase 0 | API contract、Rust health |
+| Wave 2 | Agent / Pipeline / Project / Task CRUD / MSW | Phase 3, 9 部分 | Phase 2 skeleton、Phase 1 contract | Rust CRUD、前端 mock tests |
+| Wave 3 | Queue / Runner / SSE / Rust unit tests | Phase 4, 5, 9 部分 | Task CRUD 最小版 | task 可執行、live log |
+| Wave 4 | Orchestrator / runs API / task detail UI / E2E 草稿 | Phase 6, 7, 9 部分 | Queue + Runner + SSE 合併 | 完整任務狀態機、歷史 logs |
+| Wave 5 | Settings API / Settings UI / UX / CI | Phase 8, 9 | Rust API 基本穩定 | settings、CI、E2E |
+| Wave 6 | 無 | Phase 10 | Wave 0-5 驗收完成 | Rust 正式切換 |
