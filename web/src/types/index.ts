@@ -1,6 +1,7 @@
 // ── Enums ──────────────────────────────────────────────────────────────────
 
 export type ModelProvider = 'claude' | 'gemini'
+export type ServiceStatus = 'ok' | 'warn' | 'error' | 'unknown'
 
 export type TaskStatus =
   | 'pending'
@@ -197,6 +198,30 @@ export interface SseDoneEvent {
 export interface ApiError {
   message: string
   code?: string
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────
+
+export interface HealthCheckItem {
+  key: string
+  label: string
+  status: ServiceStatus
+  detail?: string
+}
+
+export interface HealthResponse {
+  status: ServiceStatus
+  checks: HealthCheckItem[]
+  updatedAt?: string
+}
+
+export interface RuntimeConfig {
+  port: number
+  claudeTimeoutSecs: number
+  defaultMaxRetries: number
+  taskConcurrency: number
+  allowOrigins: string[]
+  geminiApiKeyConfigured: boolean
 }
 
 export interface Paginated<T> {
