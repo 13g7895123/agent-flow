@@ -63,8 +63,8 @@ services:
     profiles:
       - go-backend
 
-  # Rust backend (new)
-  backend-rust-service:
+  # Rust backend (new default)
+  backend-rust:
     build:
       context: ./backend-rust
       dockerfile: Dockerfile
@@ -104,7 +104,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:${BACKEND_PORT:-3001}
     depends_on:
-      - backend
+      - backend-rust
 
 volumes:
   pgdata:

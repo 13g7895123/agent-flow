@@ -1084,7 +1084,7 @@ pub trait ModelRunner {
 
    ```text
    GET /api/health
-   GET /api/config/runtime
+   GET /api/runtime-config
    ```
 
 2. Health check 檢查：
@@ -1162,6 +1162,24 @@ pub trait ModelRunner {
 
 目標：停止使用 Go 後端，正式切到 Rust。
 
+前置條件：
+
+- Wave 0-5 的交會點全部驗收完成。
+- Rust 後端已覆蓋 Agent、Pipeline、Project、Task、runs、logs、SSE、cancel、retry、settings。
+- `web build`、Rust test、E2E、`docker compose build` 最近一次結果為綠燈。
+- 已保留 Go backend 可回退路徑，不在正式切換前直接刪除。
+
+檔案範圍：
+
+- `docker-compose.yml`
+- `docker-compose.override.yml` 或其他本機 compose 覆寫檔（如果存在）
+- `web/.env*`
+- `DESIGN.md`
+- `plan.md`
+- `QUICKSTART_E2E.md`
+- `.env.example`
+- Go / Rust backend 啟動說明文件
+
 步驟：
 
 1. 修改 `docker-compose.yml`，新增 `backend-rust` service。
@@ -1176,7 +1194,7 @@ pub trait ModelRunner {
 3. 前端 `.env` 改：
 
    ```text
-   VITE_API_URL=http://localhost:3002/api
+   VITE_API_URL=http://localhost:3002
    ```
 
 4. 完整手動測試：
@@ -1191,19 +1209,57 @@ pub trait ModelRunner {
    重試 failed Task
    看 task runs
    看 run logs
+   看 settings health
    ```
 
 5. 沒問題後，把 Rust port 改回 3001。
 
-6. 移除 Go backend service 或標成 legacy。
+6. 前端預設 API URL 改回主要後端 port，確認不需要本機額外手改即可啟動。
 
-7. 更新 `README.md`、`DESIGN.md`、`plan.md`。
+7. Go backend service 移除或標成 legacy。
+
+8. 補 legacy 說明：
+
+   ```text
+   哪些情況仍需要啟動 Go
+   如何手動切回 Go
+   預計何時完全移除
+   ```
+
+9. 更新 `DESIGN.md`、`plan.md`、`QUICKSTART_E2E.md`、`.env.example`；若之後真的需要 README，再另行新增。
+
+10. 保留切換紀錄：
+
+   ```text
+   切換日期
+   驗收人
+   驗收指令
+   已知限制
+   rollback 指令
+   ```
+
+回退條件：
+
+- 建 Task 後無法進入 `running`。
+- SSE 無法穩定收到 `status` / `done`。
+- `/tasks/:id` 查不到 runs 或 logs。
+- cancel / retry 任一路徑失效。
+- settings health 顯示關鍵依賴異常，且非環境設定失誤。
+
+回退步驟：
+
+1. 前端 `VITE_API_URL` 指回 Go port。
+2. compose 預設 backend service 指回 Go。
+3. Rust backend 保留啟動能力，用於繼續修正，不直接刪除。
+4. 在文件記錄本次切換失敗原因與未通過的驗收項目。
 
 完成標準：
 
 - `docker compose up` 預設啟動 Rust 後端。
 - 前端全部功能使用 Rust API。
 - Go 後端不再是主要執行路徑。
+- 有明確 rollback 指南。
+- 操作文件不再把 Go 當成預設後端。
 
 ---
 
@@ -1505,12 +1561,42 @@ Track D 工作：
 
 - Phase 10：切換 Rust 後端成正式後端。
 
-步驟：
+工作目標：
+
+- 把 Rust 後端從「平行驗證中的替代實作」升級為「預設正式後端」。
+- 把前端、compose、操作文件、驗收流程全部改成以 Rust 為主。
+- 保留短期可回退能力，但不再讓 Go 佔據預設啟動路徑。
+
+不包含：
+
+- 不在這個 wave 再新增新功能。
+- 不在這個 wave 重做 API contract。
+- 不在驗收未完成前直接刪除所有 Go 程式碼。
+
+交付物：
+
+- compose 預設啟動 Rust backend。
+- 前端預設連到 Rust API。
+- Go backend 被標記為 legacy 或移出預設路徑。
+- DESIGN / plan / E2E / env 文件全部更新。
+- 一份可重跑的切換驗收清單與 rollback 說明。
+
+建議執行順序：
 
 1. `docker-compose.yml` 新增 `backend-rust` service。
 2. Go 和 Rust 先用不同 port。
 3. 前端 `.env` 先指向 Rust port。
-4. 完整手動測試：
+4. 先跑一次 smoke check：
+
+   ```text
+   docker compose build
+   docker compose up
+   前端首頁可載入
+   GET /api/health 正常
+   GET /api/runtime-config 正常
+   ```
+
+5. 完整手動測試：
 
    ```text
    建 Agent
@@ -1525,15 +1611,42 @@ Track D 工作：
    看 settings health
    ```
 
-5. 沒問題後，把 Rust port 改回主要後端 port。
-6. Go backend service 移除或標成 legacy。
-7. 更新 `README.md`、`DESIGN.md`、`plan.md`。
+6. 補驗收證據：
+
+   ```text
+   API curl 結果
+   任務詳情頁截圖
+   settings health 截圖
+   失敗重試與取消流程紀錄
+   ```
+
+7. 沒問題後，把 Rust port 改回主要後端 port。
+8. Go backend service 移除或標成 legacy。
+9. 更新 `DESIGN.md`、`plan.md`、`QUICKSTART_E2E.md`、`.env.example`；若之後真的需要 README，再另行新增。
+10. 在文件註明 rollback 方式與 legacy 使用時機。
+
+驗收清單：
+
+- `docker compose up` 不需要手改環境即可啟動完整系統。
+- 前端建立 Agent / Pipeline / Project / Task 全部打到 Rust API。
+- 執行中任務可收到 live SSE。
+- 失敗任務可 retry，取消中任務可 cancel。
+- `/tasks/:id` 可看到歷史 runs 與 logs。
+- `/admin/settings` 可顯示 backend/db/redis/claude/gemini 狀態。
+- Go backend 不再是預設相依，但仍可作為暫時 rollback 方案。
+
+失敗處理：
+
+- 若 smoke check 失敗，停止切換，只修正 Rust 或 compose，不動預設 port。
+- 若完整驗收失敗，前端與 compose 立即切回 Go 預設路徑。
+- 回退後仍保留 Rust service 與驗收紀錄，直到問題修完再重新執行 W6。
 
 完成標準：
 
 - `docker compose up` 預設啟動 Rust 後端。
 - 前端全部功能使用 Rust API。
 - Go 後端不再是主要執行路徑。
+- 切換與回退方式已寫入文件，可由其他人照單執行。
 
 ### 總覽表
 

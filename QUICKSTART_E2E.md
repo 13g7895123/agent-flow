@@ -14,16 +14,18 @@ docker compose up postgres redis
 
 ### 2. 啟動後端 API
 
-選擇其中一個：
+預設使用 Rust 後端：
 
 ```bash
-# Go MVP 後端
-cd backend
-go run cmd/server/main.go
-
-# 或 Rust 後端
 cd backend-rust
 cargo run
+```
+
+若需要比對 legacy 行為，才手動改用 Go：
+
+```bash
+cd backend
+go run cmd/server/main.go
 ```
 
 ### 3. 執行 E2E 測試
@@ -108,6 +110,9 @@ bunx playwright test -g "should create agent"
 
 ### Q: 後端 API 在不同端口怎麼辦？
 編輯 `web/playwright.config.ts`，修改 `baseURL` 與 `webServer` 設定。
+
+### Q: 目前 E2E 應該接哪個後端？
+預設以 Rust 後端為主。Go 後端只用於 legacy fallback 或比對行為。
 
 ## 各模式詳解
 

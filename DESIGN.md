@@ -1,6 +1,8 @@
 # Agent Flow 系統設計文件
 
 > 一個以 Claude CLI 為核心的 AI 任務自動執行管理系統，支援多專案、可配置 Agent 流程、各 Agent 獨立提示詞管理、自動驗收與失敗重試循環。
+>
+> 現況補充：目前 repo 的預設 compose 啟動路徑已切到 Rust backend（Axum），Go backend 保留為 legacy profile。
 
 ---
 

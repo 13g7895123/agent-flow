@@ -5,6 +5,7 @@ import type {
   Task, TaskFormData,
   ExecutionRun,
   AgentLog,
+  HealthCheckItem,
   HealthResponse,
   RuntimeConfig,
 } from '@/types'
@@ -126,22 +127,56 @@ function normalizeHealthKey(value: string): string {
   return value.trim()
 }
 
+const HEALTH_LABELS: Record<string, string> = {
+  backend: 'Backend',
+  database: 'PostgreSQL',
+  redis: 'Redis',
+  claude: 'Claude CLI',
+  gemini: 'Gemini API',
+}
+
+function normalizeHealthCheck(record: JsonRecord, fallbackKey = ''): HealthCheckItem {
+  const key = normalizeHealthKey(
+    String(readString(record, 'key') ?? readString(record, 'name') ?? readString(record, 'label') ?? fallbackKey),
+  )
+
+  return {
+    key,
+    label: String(
+      readString(record, 'label')
+        ?? readString(record, 'name')
+        ?? readString(record, 'key')
+        ?? HEALTH_LABELS[key]
+        ?? fallbackKey,
+    ),
+    status: normalizeServiceStatus(readString(record, 'status')),
+    detail: readString(record, 'detail'),
+    configured: readBoolean(record, 'configured'),
+  }
+}
+
+function normalizeHealthChecks(value: unknown): HealthCheckItem[] {
+  if (Array.isArray(value)) {
+    return value.map(check => normalizeHealthCheck(asRecord(check)))
+  }
+
+  if (!value || typeof value !== 'object') {
+    return []
+  }
+
+  const record = asRecord(value)
+  const orderedKeys = ['backend', 'database', 'redis', 'claude', 'gemini']
+  const remainingKeys = Object.keys(record).filter(key => !orderedKeys.includes(key))
+
+  return [...orderedKeys, ...remainingKeys].flatMap(key => {
+    const item = record[key]
+    if (!item || typeof item !== 'object') return []
+    return [normalizeHealthCheck(asRecord(item), key)]
+  })
+}
+
 function normalizeHealth(raw: JsonRecord): HealthResponse {
-  const checksValue = raw.checks
-  const checks = Array.isArray(checksValue)
-    ? checksValue.map(check => {
-        const record = asRecord(check)
-        const key = normalizeHealthKey(
-          String(readString(record, 'key') ?? readString(record, 'name') ?? readString(record, 'label') ?? ''),
-        )
-        return {
-          key,
-          label: String(readString(record, 'label') ?? readString(record, 'name') ?? readString(record, 'key') ?? ''),
-          status: normalizeServiceStatus(readString(record, 'status')),
-          detail: readString(record, 'detail'),
-        }
-      })
-    : []
+  const checks = normalizeHealthChecks(raw.checks)
 
   return {
     status: normalizeServiceStatus(readString(raw, 'status')),
