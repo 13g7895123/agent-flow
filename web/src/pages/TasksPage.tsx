@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, RotateCcw, X, Terminal, ChevronDown, ChevronUp } from 
 import { useProject } from '@/hooks/useProjects'
 import { useTasks, useCreateTask, useCancelTask, useRetryTask } from '@/hooks/useTasks'
 import { useTaskStream } from '@/hooks/useTaskStream'
+import { MobileTaskList } from '@/components/tasks/MobileTaskList'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -200,6 +201,10 @@ export function TasksPage() {
   const activeStatuses: TaskStatus[] = ['running', 'verifying', 'fixing']
   const hasActive = tasks.some(t => activeStatuses.includes(t.status))
 
+  const renderTaskCard = (task: Task) => (
+    <TaskCard task={task} onDetail={handleTaskDetail} />
+  )
+
   if (loadingProject || loadingTasks) {
     return (
       <div className="flex items-center justify-center h-48">
@@ -238,7 +243,7 @@ export function TasksPage() {
         </div>
       </div>
 
-      {/* Kanban */}
+      {/* Task List / Kanban */}
       {tasks.length === 0 ? (
         <EmptyState
           icon={Plus}
@@ -247,28 +252,40 @@ export function TasksPage() {
           action={<Button onClick={() => setCreateOpen(true)}><Plus size={16} /> 新增任務</Button>}
         />
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-          {COLUMNS.map(col => {
-            const colTasks = tasksByStatus(col.status)
-            return (
-              <div key={col.status} className="flex-shrink-0 w-72">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm font-medium">{col.label}</span>
-                  {colTasks.length > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--color-surface-2)] text-[var(--color-muted)]">
-                      {colTasks.length}
-                    </span>
-                  )}
+        <>
+          {/* Mobile: Tabbed view */}
+          <div className="md:hidden">
+            <MobileTaskList
+              tasks={tasks}
+              columns={COLUMNS}
+              renderTaskCard={renderTaskCard}
+            />
+          </div>
+
+          {/* Desktop: Kanban view */}
+          <div className="hidden md:flex gap-4 overflow-x-auto pb-4">
+            {COLUMNS.map(col => {
+              const colTasks = tasksByStatus(col.status)
+              return (
+                <div key={col.status} className="flex-shrink-0 w-72">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-sm font-medium">{col.label}</span>
+                    {colTasks.length > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--color-surface-2)] text-[var(--color-muted)]">
+                        {colTasks.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3 min-h-24">
+                    {colTasks.map(task => (
+                      <TaskCard key={task.id} task={task} onDetail={handleTaskDetail} />
+                    ))}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-3 min-h-24">
-                  {colTasks.map(task => (
-                    <TaskCard key={task.id} task={task} onDetail={handleTaskDetail} />
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {/* Modals */}

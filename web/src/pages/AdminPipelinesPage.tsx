@@ -14,6 +14,8 @@ import {
   useSetDefaultPipeline, useDeletePipeline,
 } from '@/hooks/usePipelines'
 import { useAgents } from '@/hooks/useAgents'
+import { useToast } from '@/components/ui/ToastProvider'
+import { AccessibleDndInstructions } from '@/components/pipelines/AccessibleDndInstructions'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -208,6 +210,9 @@ export function PipelineForm({
         ))}
       </Select>
 
+      {/* Accessible DnD Instructions */}
+      <AccessibleDndInstructions className="mb-4" />
+
       {/* Steps */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -264,6 +269,7 @@ export function PipelineForm({
 // ── Main Page ─────────────────────────────────────────────────────────────
 
 export function AdminPipelinesPage() {
+  const toast = useToast()
   const { data: pipelines = [], isLoading } = usePipelines()
   const create     = useCreatePipeline()
   const update     = useUpdatePipeline()
@@ -275,17 +281,44 @@ export function AdminPipelinesPage() {
   const [deleteTarget,  setDeleteTarget]  = useState<Pipeline | null>(null)
 
   const handleCreate = (data: PipelineFormData) => {
-    create.mutate(data, { onSuccess: () => setCreateOpen(false) })
+    create.mutate(data, {
+      onSuccess: () => {
+        setCreateOpen(false)
+        toast.addToast('Pipeline 已建立', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法建立 Pipeline'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   const handleUpdate = (data: PipelineFormData) => {
     if (!editTarget) return
-    update.mutate({ id: editTarget.id, data }, { onSuccess: () => setEditTarget(null) })
+    update.mutate({ id: editTarget.id, data }, {
+      onSuccess: () => {
+        setEditTarget(null)
+        toast.addToast('Pipeline 已更新', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法更新 Pipeline'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   const handleDelete = () => {
     if (!deleteTarget) return
-    del.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) })
+    del.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null)
+        toast.addToast('Pipeline 已刪除', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法刪除 Pipeline'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   if (isLoading) {
