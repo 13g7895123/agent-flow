@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { FolderOpen, Bot, GitBranch, Sun, Moon } from 'lucide-react'
+import { FolderOpen, Bot, GitBranch, Settings2, Sun, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -17,6 +17,7 @@ const mainNav: NavItem[] = [
 const adminNav: NavItem[] = [
   { to: '/admin/agents',    icon: Bot,        label: 'Agent 庫' },
   { to: '/admin/pipelines', icon: GitBranch,  label: 'Pipeline' },
+  { to: '/admin/settings',  icon: Settings2,  label: '設定' },
 ]
 
 function NavItem({ to, icon: Icon, label, end }: NavItem) {

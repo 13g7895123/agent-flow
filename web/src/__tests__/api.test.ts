@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from './mocks/server'
 import { fixtures } from './mocks/handlers'
-import { agentsApi, pipelinesApi, projectsApi, runsApi, tasksApi } from '@/lib/api'
+import { agentsApi, pipelinesApi, projectsApi, runsApi, settingsApi, tasksApi } from '@/lib/api'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -36,13 +36,15 @@ describe('api client', () => {
   })
 
   it('matches the mocked backend contract for list/get/create routes', async () => {
-    const [agents, pipeline, project, runs, logs, createdTask] = await Promise.all([
+    const [agents, pipeline, project, runs, logs, createdTask, health, runtimeConfig] = await Promise.all([
       agentsApi.list(),
       pipelinesApi.get('pipeline-1'),
       projectsApi.get('project-1'),
       tasksApi.runs('task-1'),
       runsApi.logs('run-1'),
       tasksApi.create('project-1', { prompt: 'New task', maxRetries: 2 }),
+      settingsApi.health(),
+      settingsApi.runtimeConfig(),
     ])
 
     expect(agents).toHaveLength(1)
@@ -66,6 +68,20 @@ describe('api client', () => {
       prompt: 'New task',
       maxRetries: 2,
       status: 'pending',
+    })
+    expect(health).toMatchObject({
+      status: 'ok',
+      checks: expect.arrayContaining([
+        expect.objectContaining({ key: 'backend', status: 'ok' }),
+        expect.objectContaining({ key: 'claude', status: 'ok' }),
+      ]),
+    })
+    expect(runtimeConfig).toMatchObject({
+      port: 3001,
+      claudeTimeoutSecs: 300,
+      defaultMaxRetries: 5,
+      taskConcurrency: 2,
+      geminiApiKeyConfigured: false,
     })
   })
 

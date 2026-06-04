@@ -5,6 +5,7 @@ import { TasksPage }          from '@/pages/TasksPage'
 import { TaskDetailPage }     from '@/pages/TaskDetailPage'
 import { AdminAgentsPage }    from '@/pages/AdminAgentsPage'
 import { AdminPipelinesPage } from '@/pages/AdminPipelinesPage'
+import { AdminSettingsPage }  from '@/pages/AdminSettingsPage'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="tasks/:id"            element={<TaskDetailPage />} />
         <Route path="admin/agents"         element={<AdminAgentsPage />} />
         <Route path="admin/pipelines"      element={<AdminPipelinesPage />} />
+        <Route path="admin/settings"       element={<AdminSettingsPage />} />
         <Route path="*"                    element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

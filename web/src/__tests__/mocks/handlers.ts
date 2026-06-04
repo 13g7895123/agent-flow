@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import type { Agent, AgentLog, ExecutionRun, Pipeline, Project, Task } from '@/types'
+import type { Agent, AgentLog, ExecutionRun, HealthResponse, Pipeline, Project, RuntimeConfig, Task } from '@/types'
 
 const BASE = '/api'
 
@@ -124,6 +124,25 @@ export const fixtures = {
     updatedAt: '2026-06-03T00:00:00.000Z',
     completedAt: null,
   } satisfies Task,
+  health: {
+    status: 'ok',
+    updatedAt: '2026-06-03T00:00:00.000Z',
+    checks: [
+      { key: 'backend', label: 'Backend', status: 'ok', detail: 'Axum server 已啟動' },
+      { key: 'database', label: 'PostgreSQL', status: 'ok', detail: 'DB ping 成功' },
+      { key: 'redis', label: 'Redis', status: 'warn', detail: 'Queue 健康但延遲偏高' },
+      { key: 'claude', label: 'Claude CLI', status: 'ok', detail: 'Claude CLI 可執行' },
+      { key: 'gemini', label: 'Gemini API', status: 'warn', detail: 'API key 未設定' },
+    ],
+  } satisfies HealthResponse,
+  runtimeConfig: {
+    port: 3001,
+    claudeTimeoutSecs: 300,
+    defaultMaxRetries: 5,
+    taskConcurrency: 2,
+    allowOrigins: ['http://localhost:3000', 'http://localhost:5173'],
+    geminiApiKeyConfigured: false,
+  } satisfies RuntimeConfig,
 }
 
 async function readJson<T>(request: Request): Promise<T> {
@@ -131,6 +150,9 @@ async function readJson<T>(request: Request): Promise<T> {
 }
 
 export const handlers = [
+  http.get(`${BASE}/health`, () => HttpResponse.json(fixtures.health)),
+  http.get(`${BASE}/runtime-config`, () => HttpResponse.json(fixtures.runtimeConfig)),
+
   http.get(`${BASE}/agents`, () => HttpResponse.json([fixtures.agent])),
   http.get(`${BASE}/agents/:id`, ({ params }) =>
     HttpResponse.json({ ...fixtures.agent, id: String(params.id) }),
