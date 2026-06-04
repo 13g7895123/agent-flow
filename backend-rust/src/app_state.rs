@@ -1,9 +1,10 @@
 use crate::config::Config;
 use crate::domain::{
-    Agent, AgentSnapshot, CreateAgentRequest, CreatePipelineRequest, CreateProjectRequest,
-    CreateTaskRequest, ExecutionRun, ModelProvider, Pipeline, PipelineFixerAgent, PipelineSnapshot,
-    PipelineStep, PipelineStepAgent, Project, ProjectPipeline, StepSnapshot, Task, TaskStatus,
-    UpdateAgentRequest, UpdatePipelineRequest, UpdateProjectRequest,
+    Agent, AgentLog, AgentSnapshot, CreateAgentRequest, CreatePipelineRequest,
+    CreateProjectRequest, CreateTaskRequest, ExecutionRun, LogType, ModelProvider, Pipeline,
+    PipelineFixerAgent, PipelineSnapshot, PipelineStep, PipelineStepAgent, Project,
+    ProjectPipeline, RunPhase, StepSnapshot, Task, TaskStatus, UpdateAgentRequest,
+    UpdatePipelineRequest, UpdateProjectRequest,
 };
 use crate::events::{TaskEvent, TaskEventBus};
 use chrono::Utc;
@@ -14,7 +15,7 @@ use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    pub store: Arc<Mutex<Store>>,
+    store: Arc<Mutex<Store>>,
     pub queue: Arc<Option<crate::queue::TaskQueue>>,
     event_bus: Arc<TaskEventBus>,
 }
@@ -25,13 +26,19 @@ struct Store {
     projects: HashMap<String, Project>,
     tasks: HashMap<String, Task>,
     runs: HashMap<String, Vec<ExecutionRun>>,
+    logs: HashMap<String, Vec<AgentLog>>,
     next_seq: u64,
 }
 
 impl Store {
-    fn next_id(&mut self, prefix: &str) -> String {
-        let id = format!("{}-{}", prefix, self.next_seq);
+    fn next_sequence(&mut self) -> u64 {
+        let sequence = self.next_seq;
         self.next_seq += 1;
+        sequence
+    }
+
+    fn next_id(&mut self, prefix: &str) -> String {
+        let id = format!("{}-{}", prefix, self.next_sequence());
         id
     }
 }
@@ -121,6 +128,7 @@ impl AppState {
                 projects: HashMap::from([(project.id.clone(), project)]),
                 tasks: HashMap::new(),
                 runs: HashMap::new(),
+                logs: HashMap::new(),
                 next_seq: 10,
             })),
             queue: Arc::new(None),
@@ -580,15 +588,26 @@ impl AppState {
 
     pub async fn list_runs(&self, task_id: &str) -> Option<Vec<ExecutionRun>> {
         let store = self.store.lock().await;
-        store.runs.get(task_id).cloned()
+        let mut runs = store.runs.get(task_id).cloned()?;
+        runs.sort_by(|a, b| {
+            a.run_index
+                .cmp(&b.run_index)
+                .then(a.started_at.cmp(&b.started_at))
+        });
+        Some(runs)
     }
 
-    pub async fn update_task_status(&self, id: &str, status: TaskStatus) {
-        let mut store = self.store.lock().await;
-        if let Some(task) = store.tasks.get_mut(id) {
+    pub async fn update_task_status(&self, id: &str, status: TaskStatus) -> Option<Task> {
+        let task = {
+            let mut store = self.store.lock().await;
+            let task = store.tasks.get_mut(id)?;
             task.status = status;
             task.updated_at = Utc::now();
-        }
+            task.clone()
+        };
+
+        self.publish_task_status(&task);
+        Some(task)
     }
 
     pub async fn set_task_completed(&self, id: &str, completed_at: Option<chrono::DateTime<Utc>>) {
@@ -597,5 +616,119 @@ impl AppState {
             task.completed_at = completed_at;
             task.updated_at = Utc::now();
         }
+    }
+
+    pub async fn start_run(
+        &self,
+        task_id: &str,
+        step_id: Option<String>,
+        phase: RunPhase,
+    ) -> Option<ExecutionRun> {
+        let mut store = self.store.lock().await;
+        if !store.tasks.contains_key(task_id) {
+            return None;
+        }
+
+        let run_index = store
+            .runs
+            .get(task_id)
+            .map(|runs| runs.len() as u32 + 1)
+            .unwrap_or(1);
+        let id = store.next_id("run");
+        let started_at = Utc::now();
+        let run = ExecutionRun {
+            id: id.clone(),
+            task_id: task_id.to_string(),
+            step_id,
+            phase,
+            run_index,
+            output: String::new(),
+            exit_code: 0,
+            started_at,
+            completed_at: None,
+        };
+
+        store
+            .runs
+            .entry(task_id.to_string())
+            .or_default()
+            .push(run.clone());
+        store.logs.entry(id).or_default();
+        Some(run)
+    }
+
+    pub async fn finish_run(
+        &self,
+        run_id: &str,
+        output: String,
+        exit_code: i32,
+        completed_at: Option<chrono::DateTime<Utc>>,
+    ) -> Option<ExecutionRun> {
+        let mut store = self.store.lock().await;
+        for runs in store.runs.values_mut() {
+            if let Some(run) = runs.iter_mut().find(|run| run.id == run_id) {
+                run.output = output;
+                run.exit_code = exit_code;
+                run.completed_at = completed_at.or_else(|| Some(Utc::now()));
+                return Some(run.clone());
+            }
+        }
+        None
+    }
+
+    pub async fn append_run_log(
+        &self,
+        run_id: &str,
+        log_type: LogType,
+        content: String,
+    ) -> Option<AgentLog> {
+        let mut store = self.store.lock().await;
+        let run_exists = store
+            .runs
+            .values()
+            .any(|runs| runs.iter().any(|run| run.id == run_id));
+        if !run_exists {
+            return None;
+        }
+
+        let sequence = store.next_sequence();
+        let log = AgentLog {
+            id: format!("log-{}", sequence),
+            run_id: run_id.to_string(),
+            sequence,
+            log_type,
+            content,
+            created_at: Utc::now(),
+        };
+
+        store
+            .logs
+            .entry(run_id.to_string())
+            .or_default()
+            .push(log.clone());
+        Some(log)
+    }
+
+    pub async fn get_run(&self, run_id: &str) -> Option<ExecutionRun> {
+        let store = self.store.lock().await;
+        store
+            .runs
+            .values()
+            .flat_map(|runs| runs.iter())
+            .find(|run| run.id == run_id)
+            .cloned()
+    }
+
+    pub async fn list_run_logs(&self, run_id: &str) -> Option<Vec<AgentLog>> {
+        let store = self.store.lock().await;
+        let _ = store
+            .runs
+            .values()
+            .flat_map(|runs| runs.iter())
+            .find(|run| run.id == run_id)?;
+
+        let mut logs = store.logs.get(run_id).cloned().unwrap_or_default();
+        logs.sort_by(|a, b| a.sequence.cmp(&b.sequence));
+        Some(logs)
     }
 }

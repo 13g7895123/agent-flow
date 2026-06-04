@@ -269,3 +269,15 @@ pub struct ExecutionRun {
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLog {
+    pub id: String,
+    pub run_id: String,
+    pub sequence: u64,
+    #[serde(rename = "type")]
+    pub log_type: LogType,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}

@@ -5,6 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use backend_rust::domain::{CreateTaskRequest, LogType, RunPhase};
 use backend_rust::{build_app, build_state};
 use tower::ServiceExt; // for `oneshot`
 
@@ -135,4 +136,81 @@ async fn terminal_task_stream_emits_status_and_done() {
         body.contains("\"status\":\"cancelled\""),
         "done payload should reflect cancelled status: {body}"
     );
+}
+
+#[tokio::test]
+async fn runs_and_run_logs_endpoints_return_execution_history() {
+    let state = build_state();
+    let task = state
+        .create_task(
+            "project-1",
+            CreateTaskRequest {
+                prompt: "Track execution history".to_string(),
+                max_retries: 2,
+            },
+        )
+        .await
+        .expect("task should be created");
+
+    let run = state
+        .start_run(&task.id, Some("step-1".to_string()), RunPhase::Step)
+        .await
+        .expect("run should be created");
+
+    state
+        .append_run_log(&run.id, LogType::Stdout, "worker started".to_string())
+        .await
+        .expect("stdout log should be stored");
+    state
+        .append_run_log(&run.id, LogType::Stderr, "warning: retrying".to_string())
+        .await
+        .expect("stderr log should be stored");
+    state
+        .finish_run(
+            &run.id,
+            "worker started\nwarning: retrying".to_string(),
+            0,
+            None,
+        )
+        .await
+        .expect("run should be updated");
+
+    let app = build_app(state.clone());
+    let runs_resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/tasks/{}/runs", task.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(runs_resp.status(), StatusCode::OK);
+    let runs_json: serde_json::Value =
+        serde_json::from_str(&body_to_string(runs_resp.into_body()).await).unwrap();
+    let runs = runs_json.as_array().expect("runs should be an array");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["id"], run.id);
+    assert_eq!(runs[0]["taskId"], task.id);
+    assert_eq!(runs[0]["phase"], "step");
+
+    let app = build_app(state.clone());
+    let logs_resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/runs/{}/logs", run.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logs_resp.status(), StatusCode::OK);
+    let logs_json: serde_json::Value =
+        serde_json::from_str(&body_to_string(logs_resp.into_body()).await).unwrap();
+    let logs = logs_json.as_array().expect("logs should be an array");
+    assert_eq!(logs.len(), 2);
+    assert_eq!(logs[0]["runId"], run.id);
+    assert_eq!(logs[0]["type"], "stdout");
+    assert_eq!(logs[0]["content"], "worker started");
+    assert_eq!(logs[1]["type"], "stderr");
 }

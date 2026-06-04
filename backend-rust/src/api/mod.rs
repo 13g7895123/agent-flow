@@ -54,6 +54,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/tasks/:id/cancel", put(cancel_task))
         .route("/api/tasks/:id/retry", put(retry_task))
         .route("/api/tasks/:id/runs", get(list_runs))
+        .route("/api/runs/:run_id/logs", get(get_run_logs))
         .route("/api/tasks/:id/stream", get(task_stream))
         .layer(Extension(state))
 }
@@ -321,6 +322,18 @@ async fn list_runs(
         .await
         .ok_or_else(|| not_found("Task not found"))?;
     Ok(Json(state.list_runs(&id).await.unwrap_or_default()))
+}
+
+async fn get_run_logs(
+    Path(run_id): Path<String>,
+    Extension(state): Extension<Arc<AppState>>,
+) -> Result<Json<Vec<crate::domain::AgentLog>>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .get_run(&run_id)
+        .await
+        .ok_or_else(|| not_found("Run not found"))?;
+
+    Ok(Json(state.list_run_logs(&run_id).await.unwrap_or_default()))
 }
 
 async fn task_stream(
