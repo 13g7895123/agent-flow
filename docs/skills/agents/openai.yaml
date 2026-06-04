@@ -1,0 +1,8 @@
+interface:
+  display_name: "Wave/Track Worktree Flow"
+  short_description: "Read first for repo dev sessions"
+  default_prompt: "Use $wave-track-worktree-flow to enforce the worktree-first flow, exact file comparison before commit, and no main-branch development for wave/track tasks."
+
+policy:
+  allow_implicit_invocation: true
+

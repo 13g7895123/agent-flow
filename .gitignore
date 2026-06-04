@@ -24,3 +24,8 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Local Codex overlay
+.codex/
+.claude/
+docs/skills/.system
