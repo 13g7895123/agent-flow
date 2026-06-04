@@ -1,55 +1,13 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Terminal, ChevronDown, ChevronUp } from 'lucide-react'
-import { useTask } from '@/hooks/useTasks'
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, ChevronDown, ChevronUp, FileText, GitBranch, History, Terminal } from 'lucide-react'
+import { useRunLogs, useTask, useTaskRuns } from '@/hooks/useTasks'
 import { useTaskStream } from '@/hooks/useTaskStream'
-import { Button } from '@/components/ui/Button'
 import { StatusBadge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { cn, formatRelative } from '@/lib/utils'
-import type { TaskStatus } from '@/types'
-
-// ── Task Header ───────────────────────────────────────────────────────────
-
-function TaskHeader({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-  const navigate = useNavigate()
-
-  if (!task) {
-    return (
-      <div className="flex items-center gap-3 pb-4 border-b border-[var(--color-border)]">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft size={16} />
-        </Button>
-        <span className="text-[var(--color-muted)]">任務未找到</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-4 pb-6 border-b border-[var(--color-border)]">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft size={16} />
-        </Button>
-        <h1 className="text-2xl font-bold">任務詳情</h1>
-      </div>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <StatusBadge status={task.status} />
-          <span className="text-sm text-[var(--color-muted)]">
-            重試次數：{task.currentRetry} / {task.maxRetries}
-          </span>
-        </div>
-        <div className="text-sm text-[var(--color-muted)]">
-          {task.createdAt && <span>建立：{formatRelative(task.createdAt as string)}</span>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Expandable Panel ──────────────────────────────────────────────────────
+import type { ExecutionRun, Task, TaskStatus } from '@/types'
 
 function ExpandablePanel({
   title,
@@ -57,252 +15,311 @@ function ExpandablePanel({
   children,
   defaultExpanded = true,
 }: {
-  title: string | React.ReactNode
-  icon?: React.ComponentType<{ size: number }>
-  children: React.ReactNode
+  title: ReactNode
+  icon?: ComponentType<{ size: number }>
+  children: ReactNode
   defaultExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const IconComponent = Icon
 
   return (
-    <div className="border border-[var(--color-border)] rounded-[var(--radius-md)] overflow-hidden">
+    <div className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
       <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full px-4 py-3 bg-[var(--color-surface-2)] text-sm font-medium cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors"
+        onClick={() => setExpanded(current => !current)}
+        className="flex w-full items-center justify-between bg-[var(--color-surface-2)] px-4 py-3 text-sm font-medium transition-colors hover:bg-[var(--color-surface-3)]"
       >
         <span className="flex items-center gap-2">
-          {IconComponent && <IconComponent size={16} />}
+          {Icon ? <Icon size={16} /> : null}
           {title}
         </span>
         {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
-      {expanded && (
-        <div className="bg-[var(--color-background)] p-4">
-          {children}
-        </div>
-      )}
+      {expanded ? <div className="bg-[var(--color-background)] p-4">{children}</div> : null}
     </div>
   )
 }
 
-// ── Task Prompt Panel ─────────────────────────────────────────────────────
-
-function TaskPromptPanel({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-
-  if (!task) return null
+function TaskHeader({ task }: { task: Task }) {
+  const navigate = useNavigate()
 
   return (
-    <ExpandablePanel title="提示詞" defaultExpanded>
-      <div className="bg-[var(--color-surface)] rounded p-3 text-sm whitespace-pre-wrap font-mono text-[var(--color-foreground)]">
-        {task.prompt}
+    <div className="border-b border-[var(--color-border)] pb-6">
+      <div className="mb-4 flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+          <ArrowLeft size={16} />
+        </Button>
+        <h1 className="text-2xl font-bold">任務詳情</h1>
       </div>
-    </ExpandablePanel>
-  )
-}
 
-// ── Pipeline Snapshot Panel ───────────────────────────────────────────────
-
-function PipelineSnapshotPanel({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-
-  if (!task || !task.pipelineSnapshot) return null
-
-  const snapshot = task.pipelineSnapshot
-
-  return (
-    <ExpandablePanel title="Pipeline 快照" defaultExpanded>
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-medium mb-2">Pipeline：{snapshot.name}</h3>
-          {snapshot.steps && snapshot.steps.length > 0 ? (
-            <div className="space-y-2">
-              {snapshot.steps.map((step: any) => (
-                <div
-                  key={step.id}
-                  className="flex items-center gap-2 p-2 bg-[var(--color-surface)] rounded text-sm"
-                >
-                  <span className="font-mono text-xs bg-[var(--color-surface-2)] px-2 py-1 rounded">
-                    {step.order}
-                  </span>
-                  <span>{step.label}</span>
-                  <span className="text-[var(--color-muted)] ml-auto">{step.agent?.name}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={Terminal}
-              title="無步驟"
-              description="此 Pipeline 沒有定義步驟"
-            />
-          )}
+      <div className="grid gap-3 md:grid-cols-[auto,1fr] md:items-start">
+        <div className="flex items-center gap-3">
+          <StatusBadge status={task.status} />
+          <span className="text-sm text-[var(--color-muted)]">
+            重試次數：{task.currentRetry} / {task.maxRetries}
+          </span>
+        </div>
+        <div className="grid gap-1 text-sm text-[var(--color-muted)] md:justify-items-end">
+          <span>建立：{formatRelative(task.createdAt)}</span>
+          <span>更新：{formatRelative(task.updatedAt)}</span>
+          {task.completedAt ? <span>完成：{formatRelative(task.completedAt)}</span> : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+function TaskPromptPanel({ task }: { task: Task }) {
+  return (
+    <ExpandablePanel title="提示詞" icon={FileText}>
+      <pre className="whitespace-pre-wrap rounded bg-[var(--color-surface)] p-3 font-mono text-sm text-[var(--color-foreground)]">
+        {task.prompt}
+      </pre>
     </ExpandablePanel>
   )
 }
 
-// ── Step Output Panel ─────────────────────────────────────────────────────
-
-function StepOutputPanel({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-
-  if (!task || !task.stepOutputs || Object.keys(task.stepOutputs).length === 0) {
-    return null
-  }
+function PipelineSnapshotPanel({ task }: { task: Task }) {
+  const steps = [...task.pipelineSnapshot.steps].sort((a, b) => a.order - b.order)
 
   return (
-    <ExpandablePanel title="步驟輸出" defaultExpanded={false}>
+    <ExpandablePanel title="Pipeline 快照" icon={GitBranch}>
       <div className="space-y-3">
-        {Object.entries(task.stepOutputs).map(([stepId, output]: [string, any]) => (
-          <div key={stepId} className="bg-[var(--color-surface)] rounded p-3">
-            <h4 className="text-sm font-medium mb-2">{stepId}</h4>
-            <div className="bg-[var(--color-background)] rounded p-2 max-h-32 overflow-y-auto">
-              <pre className="text-xs whitespace-pre-wrap font-mono text-[var(--color-muted)]">
-                {typeof output === 'string' ? output : JSON.stringify(output, null, 2)}
-              </pre>
-            </div>
+        <div>
+          <div className="text-sm font-medium">Pipeline：{task.pipelineSnapshot.name}</div>
+          <div className="mt-1 text-xs text-[var(--color-muted)]">
+            Fixer：{task.pipelineSnapshot.fixerAgent.name}
           </div>
-        ))}
-      </div>
-    </ExpandablePanel>
-  )
-}
-
-// ── Execution Runs Panel ──────────────────────────────────────────────────
-
-function ExecutionRunsPanel({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-
-  if (!task || !task.runs || task.runs.length === 0) {
-    return (
-      <ExpandablePanel title="執行紀錄" defaultExpanded={false}>
-        <EmptyState
-          icon={Terminal}
-          title="無執行紀錄"
-          description="此任務還沒有執行記錄"
-        />
-      </ExpandablePanel>
-    )
-  }
-
-  return (
-    <ExpandablePanel title="執行紀錄" defaultExpanded={false}>
-      <div className="space-y-2">
-        {task.runs.map((run: any) => (
-          <div
-            key={run.id}
-            className="flex items-center justify-between p-3 bg-[var(--color-surface)] rounded text-sm"
-          >
-            <div className="flex flex-col gap-1 flex-1">
-              <span className="font-mono text-xs text-[var(--color-muted)]">Run {run.runIndex}</span>
-              <span className="text-[var(--color-foreground)]">
-                Phase: <span className="font-mono">{run.phase}</span>
-              </span>
-            </div>
-            <div className="text-right text-xs text-[var(--color-muted)]">
-              {run.completedAt ? (
-                <span>{formatRelative(run.completedAt as string)}</span>
-              ) : (
-                <span>執行中...</span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </ExpandablePanel>
-  )
-}
-
-// ── Live Log Panel ────────────────────────────────────────────────────────
-
-function LiveLogPanel({ taskId, status }: { taskId: string; status: TaskStatus }) {
-  const isActive = ['running', 'verifying', 'fixing'].includes(status)
-  const { logs, isConnected } = useTaskStream(taskId, isActive)
-
-  if (!isActive && logs.length === 0) return null
-
-  return (
-    <ExpandablePanel
-      title={
-        <span className="flex items-center gap-2">
-          即時日誌
-          {isConnected && (
-            <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse-dot" />
-          )}
-        </span>
-      }
-      icon={Terminal}
-      defaultExpanded
-    >
-      <div className="bg-[var(--color-background)] p-3 max-h-96 overflow-y-auto rounded font-mono text-sm log-terminal">
-        {logs.length === 0 ? (
-          <span className="text-[var(--color-muted)]">等待輸出...</span>
+        </div>
+        {steps.length === 0 ? (
+          <EmptyState icon={Terminal} title="無步驟" description="此 Pipeline 沒有定義步驟" />
         ) : (
-          logs.map((l, i) => (
-            <div
-              key={i}
-              className={cn(
-                l.type === 'system' && 'text-[var(--color-accent)] font-medium',
-                l.type === 'stderr' && 'text-[var(--color-destructive)]',
-                l.type === 'stdout' && 'text-[var(--color-foreground)]',
-              )}
-            >
-              {l.content}
-            </div>
-          ))
+          <div className="space-y-2">
+            {steps.map(step => (
+              <div
+                key={step.id}
+                className="flex items-center gap-3 rounded bg-[var(--color-surface)] p-3 text-sm"
+              >
+                <span className="rounded bg-[var(--color-surface-2)] px-2 py-1 font-mono text-xs">
+                  {step.order}
+                </span>
+                <div className="flex-1">
+                  <div>{step.label}</div>
+                  <div className="text-xs text-[var(--color-muted)]">{step.agent.name}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </ExpandablePanel>
   )
 }
 
-// ── Main Component ────────────────────────────────────────────────────────
+function StepOutputPanel({ task }: { task: Task }) {
+  const entries = Object.entries(task.stepOutputs ?? {})
+  if (entries.length === 0) return null
+
+  return (
+    <ExpandablePanel title="步驟輸出" icon={Terminal} defaultExpanded={false}>
+      <div className="space-y-3">
+        {entries.map(([stepId, output]) => (
+          <div key={stepId} className="rounded bg-[var(--color-surface)] p-3">
+            <div className="mb-2 text-sm font-medium">{stepId}</div>
+            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded bg-[var(--color-background)] p-2 font-mono text-xs text-[var(--color-muted)]">
+              {output}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </ExpandablePanel>
+  )
+}
+
+function ExecutionRunsPanel({
+  runs,
+  selectedRunId,
+  onSelectRun,
+}: {
+  runs: ExecutionRun[]
+  selectedRunId: string | null
+  onSelectRun: (runId: string) => void
+}) {
+  return (
+    <ExpandablePanel title="執行紀錄" icon={History} defaultExpanded={false}>
+      {runs.length === 0 ? (
+        <EmptyState icon={Terminal} title="無執行紀錄" description="此任務還沒有執行記錄" />
+      ) : (
+        <div className="space-y-2">
+          {runs.map(run => {
+            const isSelected = run.id === selectedRunId
+            return (
+              <button
+                key={run.id}
+                onClick={() => onSelectRun(run.id)}
+                className={cn(
+                  'w-full rounded border p-3 text-left text-sm transition-colors',
+                  isSelected
+                    ? 'border-[var(--color-accent)] bg-[var(--color-surface)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-accent)]',
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium">
+                      Run {run.runIndex} · {run.phase}
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--color-muted)]">
+                      {run.agentName ?? 'system'}
+                      {run.stepId ? ` · ${run.stepId}` : ''}
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-[var(--color-muted)]">
+                    <div>{formatRelative(run.startedAt)}</div>
+                    <div>
+                      {run.completedAt ? formatRelative(run.completedAt) : '執行中'}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--color-muted)]">
+                  <span>exit: {run.exitCode ?? '-'}</span>
+                  <span>success: {run.success == null ? '-' : run.success ? 'yes' : 'no'}</span>
+                  {run.durationMs != null ? <span>{run.durationMs} ms</span> : null}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </ExpandablePanel>
+  )
+}
+
+function LogViewerPanel({
+  taskId,
+  status,
+  selectedRun,
+}: {
+  taskId: string
+  status: TaskStatus
+  selectedRun: ExecutionRun | null
+}) {
+  const isActive = ['running', 'verifying', 'fixing'].includes(status)
+  const { logs: liveLogs, isConnected } = useTaskStream(taskId, isActive)
+  const { data: historyLogs = [] } = useRunLogs(isActive ? null : selectedRun?.id ?? null)
+  const lines = isActive
+    ? liveLogs
+    : historyLogs.map(log => ({
+        sequence: log.sequence,
+        type: log.type,
+        content: log.content,
+      }))
+
+  return (
+    <ExpandablePanel
+      title={
+        <span className="flex items-center gap-2">
+          {isActive ? '即時日誌' : '歷史日誌'}
+          {isActive && isConnected ? (
+            <span className="h-2 w-2 rounded-full bg-[var(--color-accent)] animate-pulse-dot" />
+          ) : null}
+        </span>
+      }
+      icon={Terminal}
+    >
+      {!isActive && !selectedRun ? (
+        <EmptyState icon={Terminal} title="尚未選擇執行紀錄" description="先在上方選擇一筆 run 來查看輸出" />
+      ) : (
+        <div className="space-y-3">
+          {selectedRun ? (
+            <div className="rounded bg-[var(--color-surface)] p-3 text-xs text-[var(--color-muted)]">
+              <div>Phase：{selectedRun.phase}</div>
+              {selectedRun.promptSent ? (
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-[var(--color-foreground)]">
+                  {selectedRun.promptSent}
+                </pre>
+              ) : null}
+              {!isActive && selectedRun.output ? (
+                <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] text-[var(--color-foreground)]">
+                  {selectedRun.output}
+                </pre>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="log-terminal max-h-96 overflow-y-auto rounded bg-[var(--color-background)] p-3 font-mono text-sm">
+            {lines.length === 0 ? (
+              <span className="text-[var(--color-muted)]">
+                {isActive ? '等待輸出...' : '此 run 沒有歷史 logs'}
+              </span>
+            ) : (
+              lines.map(line => (
+                <div
+                  key={`${line.sequence}-${line.content}`}
+                  className={cn(
+                    line.type === 'stderr' && 'text-[var(--color-destructive)]',
+                    line.type === 'stdout' && 'text-[var(--color-foreground)]',
+                    line.type === 'system' && 'font-medium text-[var(--color-accent)]',
+                  )}
+                >
+                  {line.content}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </ExpandablePanel>
+  )
+}
 
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: task, isLoading } = useTask(id!)
+  const { data: task, isLoading: taskLoading } = useTask(id ?? '')
+  const { data: runs = [], isLoading: runsLoading } = useTaskRuns(id ?? '')
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!runs.length) {
+      setSelectedRunId(null)
+      return
+    }
+
+    setSelectedRunId(current => {
+      if (current && runs.some(run => run.id === current)) return current
+      return runs[runs.length - 1]?.id ?? null
+    })
+  }, [runs])
 
   if (!id) {
-    return (
-      <EmptyState
-        icon={Terminal}
-        title="無效的任務 ID"
-        description="找不到指定的任務"
-      />
-    )
+    return <EmptyState icon={Terminal} title="無效的任務 ID" description="找不到指定的任務" />
   }
 
-  if (isLoading) {
+  if (taskLoading || runsLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="text-[var(--color-muted)]">載入中...</div>
       </div>
     )
   }
 
   if (!task) {
-    return (
-      <EmptyState
-        icon={Terminal}
-        title="任務未找到"
-        description="此任務不存在或已被刪除"
-      />
-    )
+    return <EmptyState icon={Terminal} title="任務未找到" description="此任務不存在或已被刪除" />
   }
 
+  const selectedRun = runs.find(run => run.id === selectedRunId) ?? null
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 py-8">
-      <TaskHeader taskId={id} />
-      <div className="space-y-4">
-        <TaskPromptPanel taskId={id} />
-        <PipelineSnapshotPanel taskId={id} />
-        <StepOutputPanel taskId={id} />
-        <ExecutionRunsPanel taskId={id} />
-        <LiveLogPanel taskId={id} status={task.status} />
-      </div>
+    <div className="mx-auto max-w-5xl space-y-6 py-8">
+      <TaskHeader task={task} />
+      <TaskPromptPanel task={task} />
+      <PipelineSnapshotPanel task={task} />
+      <StepOutputPanel task={task} />
+      <ExecutionRunsPanel
+        runs={runs}
+        selectedRunId={selectedRunId}
+        onSelectRun={setSelectedRunId}
+      />
+      <LogViewerPanel taskId={task.id} status={task.status} selectedRun={selectedRun} />
     </div>
   )
 }

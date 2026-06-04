@@ -76,6 +76,7 @@ export function useTaskStream(taskId: string | null, active: boolean) {
     es.addEventListener('done', () => {
       setState(s => ({ ...s, isConnected: false }))
       qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['tasks', 'runs', taskId] })
       es.close()
     })
 

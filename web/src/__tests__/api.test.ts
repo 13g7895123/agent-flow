@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from './mocks/server'
 import { fixtures } from './mocks/handlers'
-import { agentsApi, pipelinesApi, projectsApi, tasksApi } from '@/lib/api'
+import { agentsApi, pipelinesApi, projectsApi, runsApi, tasksApi } from '@/lib/api'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -36,11 +36,12 @@ describe('api client', () => {
   })
 
   it('matches the mocked backend contract for list/get/create routes', async () => {
-    const [agents, pipeline, project, runs, createdTask] = await Promise.all([
+    const [agents, pipeline, project, runs, logs, createdTask] = await Promise.all([
       agentsApi.list(),
       pipelinesApi.get('pipeline-1'),
       projectsApi.get('project-1'),
       tasksApi.runs('task-1'),
+      runsApi.logs('run-1'),
       tasksApi.create('project-1', { prompt: 'New task', maxRetries: 2 }),
     ])
 
@@ -57,6 +58,8 @@ describe('api client', () => {
     })
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ id: fixtures.run.id, phase: 'step', exitCode: 0 })
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({ id: fixtures.log.id, runId: 'run-1', type: 'stdout' })
     expect(createdTask).toMatchObject({
       id: 'task-created',
       projectId: 'project-1',
@@ -87,5 +90,31 @@ describe('api client', () => {
 
     const runs = await tasksApi.runs('task-override')
     expect(runs[0].id).toBe('run-for-task-override')
+  })
+
+  it('normalizes historical log payloads from alternate backend field names', async () => {
+    server.use(
+      http.get('/api/runs/:runId/logs', ({ params }) =>
+        HttpResponse.json([
+          {
+            id: 'log-alt',
+            executionRunId: String(params.runId),
+            sequence: 7,
+            logType: 'stderr',
+            content: 'failed',
+            timestamp: '2026-06-03T00:00:20.000Z',
+          },
+        ]),
+      ),
+    )
+
+    const logs = await runsApi.logs('run-alt')
+    expect(logs[0]).toMatchObject({
+      id: 'log-alt',
+      runId: 'run-alt',
+      sequence: 7,
+      type: 'stderr',
+      createdAt: '2026-06-03T00:00:20.000Z',
+    })
   })
 })
