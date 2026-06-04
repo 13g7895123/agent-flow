@@ -5,6 +5,7 @@ use crate::domain::{
     PipelineStep, PipelineStepAgent, Project, ProjectPipeline, StepSnapshot, Task, TaskStatus,
     UpdateAgentRequest, UpdatePipelineRequest, UpdateProjectRequest,
 };
+use crate::events::{TaskEvent, TaskEventBus};
 use chrono::Utc;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub config: Config,
     pub store: Arc<Mutex<Store>>,
     pub queue: Arc<Option<crate::queue::TaskQueue>>,
+    event_bus: Arc<TaskEventBus>,
 }
 
 struct Store {
@@ -122,6 +124,24 @@ impl AppState {
                 next_seq: 10,
             })),
             queue: Arc::new(None),
+            event_bus: Arc::new(TaskEventBus::new(256)),
+        }
+    }
+
+    pub fn task_events(&self) -> Arc<TaskEventBus> {
+        Arc::clone(&self.event_bus)
+    }
+
+    fn publish_task_status(&self, task: &Task) {
+        self.event_bus.publish(TaskEvent::status(
+            task.id.clone(),
+            task.status.clone(),
+            task.current_retry,
+        ));
+
+        if task.status.is_terminal() {
+            self.event_bus
+                .publish(TaskEvent::done(task.id.clone(), task.status.clone()));
         }
     }
 
@@ -522,26 +542,40 @@ impl AppState {
 
         store.tasks.insert(id.clone(), task.clone());
         store.runs.insert(id, vec![]);
+        drop(store);
+
+        self.publish_task_status(&task);
         Some(task)
     }
 
     pub async fn cancel_task(&self, id: &str) -> Option<Task> {
-        let mut store = self.store.lock().await;
-        let task = store.tasks.get_mut(id)?;
-        task.status = TaskStatus::Cancelled;
-        task.completed_at = Some(Utc::now());
-        task.updated_at = Utc::now();
-        Some(task.clone())
+        let task = {
+            let mut store = self.store.lock().await;
+            let task = store.tasks.get_mut(id)?;
+            let now = Utc::now();
+            task.status = TaskStatus::Cancelled;
+            task.completed_at = Some(now);
+            task.updated_at = now;
+            task.clone()
+        };
+
+        self.publish_task_status(&task);
+        Some(task)
     }
 
     pub async fn retry_task(&self, id: &str) -> Option<Task> {
-        let mut store = self.store.lock().await;
-        let task = store.tasks.get_mut(id)?;
-        task.status = TaskStatus::Pending;
-        task.completed_at = None;
-        task.current_retry = (task.current_retry + 1).min(task.max_retries);
-        task.updated_at = Utc::now();
-        Some(task.clone())
+        let task = {
+            let mut store = self.store.lock().await;
+            let task = store.tasks.get_mut(id)?;
+            task.status = TaskStatus::Pending;
+            task.completed_at = None;
+            task.current_retry = (task.current_retry + 1).min(task.max_retries);
+            task.updated_at = Utc::now();
+            task.clone()
+        };
+
+        self.publish_task_status(&task);
+        Some(task)
     }
 
     pub async fn list_runs(&self, task_id: &str) -> Option<Vec<ExecutionRun>> {

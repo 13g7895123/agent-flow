@@ -23,6 +23,15 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+impl TaskStatus {
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Done | TaskStatus::Failed | TaskStatus::Cancelled
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RunPhase {

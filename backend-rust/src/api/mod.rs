@@ -1,11 +1,14 @@
 use axum::{
     extract::{Extension, Path},
-    http::{header, StatusCode},
-    response::IntoResponse,
+    http::StatusCode,
+    response::sse::Sse,
     routing::{get, put},
     Json, Router,
 };
+use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 use crate::{
     app_state::AppState,
@@ -13,7 +16,12 @@ use crate::{
         CreateAgentRequest, CreatePipelineRequest, CreateProjectRequest, CreateTaskRequest, Task,
         UpdateAgentRequest, UpdatePipelineRequest, UpdateProjectRequest,
     },
+    events::TaskEvent,
 };
+
+type TaskSseStream = Pin<
+    Box<dyn tokio_stream::Stream<Item = Result<axum::response::sse::Event, Infallible>> + Send>,
+>;
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -39,10 +47,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(get_project).put(update_project).delete(del_project),
         )
         // Tasks
-        .route(
-            "/api/projects/:project_id/tasks",
-            get(list_tasks).post(create_task),
-        )
+        // 注意：axum 0.5 要求同一前綴下的捕捉段同名，故此處沿用 `:id`
+        // 與 `/api/projects/:id` 對齊，避免路由註冊衝突。
+        .route("/api/projects/:id/tasks", get(list_tasks).post(create_task))
         .route("/api/tasks/:id", get(get_task))
         .route("/api/tasks/:id/cancel", put(cancel_task))
         .route("/api/tasks/:id/retry", put(retry_task))
@@ -319,20 +326,34 @@ async fn list_runs(
 async fn task_stream(
     Path(id): Path<String>,
     Extension(state): Extension<Arc<AppState>>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    state
+) -> Result<Sse<TaskSseStream>, (StatusCode, Json<serde_json::Value>)> {
+    let task = state
         .get_task(&id)
         .await
         .ok_or_else(|| not_found("Task not found"))?;
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/event-stream"),
-            (header::CACHE_CONTROL, "no-cache"),
-            (header::CONNECTION, "keep-alive"),
-        ],
-        ": connected\n\n",
-    ))
+
+    let mut initial_events = vec![Ok::<axum::response::sse::Event, Infallible>(
+        TaskEvent::status(task.id.clone(), task.status.clone(), task.current_retry).to_event(),
+    )];
+
+    if task.status.is_terminal() {
+        initial_events.push(Ok(
+            TaskEvent::done(task.id.clone(), task.status.clone()).to_event()
+        ));
+        let stream: TaskSseStream = Box::pin(tokio_stream::iter(initial_events));
+        return Ok(Sse::new(stream));
+    }
+
+    let task_id = task.id.clone();
+    let stream: TaskSseStream = Box::pin(tokio_stream::iter(initial_events).chain(
+        BroadcastStream::new(state.task_events().subscribe()).filter_map(move |item| match item {
+            Ok(event) if event.task_id() == task_id => Some(Ok::<_, Infallible>(event.to_event())),
+            Ok(_) => None,
+            Err(_) => None,
+        }),
+    ));
+
+    Ok(Sse::new(stream))
 }
 
 // ── Error helpers ─────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ pub mod api;
 pub mod app_state;
 pub mod config;
 pub mod domain;
+pub mod events;
 pub mod orchestrator;
 pub mod queue;
 pub mod runner;
@@ -100,5 +101,46 @@ mod tests {
 
         let missing = state.list_tasks("missing").await;
         assert!(missing.is_empty());
+    }
+
+    #[tokio::test]
+    async fn task_lifecycle_publishes_status_events() {
+        use crate::domain::TaskStatus;
+
+        let state = AppState::new(Config::from_env());
+        let mut rx = state.task_events().subscribe();
+
+        let task = state
+            .create_task(
+                "project-1",
+                CreateTaskRequest {
+                    prompt: "Stream me".to_string(),
+                    max_retries: 1,
+                },
+            )
+            .await
+            .expect("task should be created");
+
+        // create_task 應廣播 pending status 事件
+        let created_event = rx.recv().await.expect("status event for create");
+        assert_eq!(created_event.task_id(), task.id);
+        assert_eq!(created_event.event_name(), "status");
+
+        // cancel 為終態：應先收到 status，再收到 done
+        state.cancel_task(&task.id).await.expect("task exists");
+
+        let status_event = rx.recv().await.expect("status event for cancel");
+        assert_eq!(status_event.event_name(), "status");
+        assert!(matches!(
+            status_event,
+            crate::events::TaskEvent::Status {
+                status: TaskStatus::Cancelled,
+                ..
+            }
+        ));
+
+        let done_event = rx.recv().await.expect("done event for terminal status");
+        assert_eq!(done_event.event_name(), "done");
+        assert_eq!(done_event.task_id(), task.id);
     }
 }
