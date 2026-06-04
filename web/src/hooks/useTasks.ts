@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tasksApi } from '@/lib/api'
+import { runsApi, tasksApi } from '@/lib/api'
 import type { TaskFormData } from '@/types'
 
 export function useTasks(projectId: string) {
@@ -15,6 +15,22 @@ export function useTask(id: string) {
     queryKey: ['tasks', 'detail', id],
     queryFn: () => tasksApi.get(id),
     enabled: !!id,
+  })
+}
+
+export function useTaskRuns(taskId: string) {
+  return useQuery({
+    queryKey: ['tasks', 'runs', taskId],
+    queryFn: () => tasksApi.runs(taskId),
+    enabled: !!taskId,
+  })
+}
+
+export function useRunLogs(runId: string | null) {
+  return useQuery({
+    queryKey: ['runs', 'logs', runId],
+    queryFn: () => runsApi.logs(runId!),
+    enabled: !!runId,
   })
 }
 

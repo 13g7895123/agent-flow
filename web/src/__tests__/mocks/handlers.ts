@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import type { Agent, Pipeline, Project, Task, ExecutionRun } from '@/types'
+import type { Agent, AgentLog, ExecutionRun, Pipeline, Project, Task } from '@/types'
 
 const BASE = '/api'
 
@@ -63,13 +63,27 @@ export const fixtures = {
     id: 'run-1',
     taskId: 'task-1',
     stepId: 'step-1',
+    agentId: 'agent-1',
+    agentName: 'Test Agent',
     phase: 'step',
     runIndex: 1,
+    promptSent: 'Implement feature',
     output: 'ok',
+    errorMessage: '',
     exitCode: 0,
+    success: true,
+    durationMs: 1200,
     startedAt: '2026-06-03T00:00:00.000Z',
     completedAt: '2026-06-03T00:01:00.000Z',
   } satisfies ExecutionRun,
+  log: {
+    id: 'log-1',
+    runId: 'run-1',
+    sequence: 1,
+    type: 'stdout',
+    content: 'worker started',
+    createdAt: '2026-06-03T00:00:10.000Z',
+  } satisfies AgentLog,
   task: {
     id: 'task-1',
     projectId: 'project-1',
@@ -224,6 +238,9 @@ export const handlers = [
     HttpResponse.json({ ...fixtures.task, id: String(params.id) }),
   ),
   http.get(`${BASE}/tasks/:id/runs`, () => HttpResponse.json([fixtures.run])),
+  http.get(`${BASE}/runs/:runId/logs`, ({ params }) =>
+    HttpResponse.json([{ ...fixtures.log, runId: String(params.runId) }]),
+  ),
   http.put(`${BASE}/tasks/:id/cancel`, () => HttpResponse.json(null, { status: 204 })),
   http.put(`${BASE}/tasks/:id/retry`, () => HttpResponse.json(null, { status: 204 })),
   http.get(`${BASE}/tasks/:id/stream`, () => new HttpResponse(null, { status: 200 })),

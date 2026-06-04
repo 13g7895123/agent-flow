@@ -11,7 +11,7 @@ export type TaskStatus =
   | 'failed'
   | 'cancelled'
 
-export type RunPhase = 'step' | 'fix'
+export type RunPhase = 'step' | 'fix' | 'verification'
 export type LogType  = 'stdout' | 'stderr'
 
 // ── Agents ─────────────────────────────────────────────────────────────────
@@ -119,10 +119,16 @@ export interface ExecutionRun {
   id: string
   taskId: string
   stepId: string | null
+  agentId?: string | null
+  agentName?: string
   phase: RunPhase
   runIndex: number
+  promptSent?: string
   output: string
-  exitCode: number
+  errorMessage?: string
+  exitCode: number | null
+  success?: boolean | null
+  durationMs?: number | null
   startedAt: string
   completedAt: string | null
 }
@@ -148,7 +154,6 @@ export interface Task {
   createdAt: string
   updatedAt: string
   completedAt: string | null
-  runs?: ExecutionRun[]
 }
 
 export interface TaskFormData {

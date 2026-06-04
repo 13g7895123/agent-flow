@@ -4,6 +4,7 @@ import type {
   Project, ProjectFormData,
   Task, TaskFormData,
   ExecutionRun,
+  AgentLog,
 } from '@/types'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -42,6 +43,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return res.json()
+}
+
+function normalizeRun(run: any): ExecutionRun {
+  return {
+    id: String(run.id),
+    taskId: String(run.taskId ?? run.task_id ?? ''),
+    stepId: run.stepId ?? run.step_id ?? null,
+    agentId: run.agentId ?? run.agent_id ?? null,
+    agentName: run.agentName ?? run.agent_name ?? undefined,
+    phase: run.phase,
+    runIndex: Number(run.runIndex ?? run.run_index ?? 0),
+    promptSent: run.promptSent ?? run.prompt_sent ?? undefined,
+    output: String(run.output ?? ''),
+    errorMessage: run.errorMessage ?? run.error_message ?? undefined,
+    exitCode: run.exitCode ?? run.exit_code ?? null,
+    success: run.success ?? null,
+    durationMs: run.durationMs ?? run.duration_ms ?? null,
+    startedAt: String(run.startedAt ?? run.started_at ?? ''),
+    completedAt: run.completedAt ?? run.completed_at ?? null,
+  }
+}
+
+function normalizeLog(log: any): AgentLog {
+  return {
+    id: String(log.id),
+    runId: String(log.runId ?? log.run_id ?? log.executionRunId ?? log.execution_run_id ?? ''),
+    sequence: Number(log.sequence ?? 0),
+    type: (log.type ?? log.logType ?? log.log_type) as AgentLog['type'],
+    content: String(log.content ?? ''),
+    createdAt: String(log.createdAt ?? log.created_at ?? log.timestamp ?? ''),
+  }
 }
 
 // ── Agents ─────────────────────────────────────────────────────────────────
@@ -84,7 +116,11 @@ export const tasksApi = {
     request<Task>(`/projects/${projectId}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
   cancel: (id: string)               => request<void>(`/tasks/${id}/cancel`, { method: 'PUT' }),
   retry:  (id: string)               => request<void>(`/tasks/${id}/retry`, { method: 'PUT' }),
-  runs:   (id: string)               => request<ExecutionRun[]>(`/tasks/${id}/runs`),
+  runs:   async (id: string)         => (await request<any[]>(`/tasks/${id}/runs`)).map(normalizeRun),
+}
+
+export const runsApi = {
+  logs:   async (runId: string)      => (await request<any[]>(`/runs/${runId}/logs`)).map(normalizeLog),
 }
 
 // ── SSE stream ─────────────────────────────────────────────────────────────
