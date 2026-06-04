@@ -1,0 +1,7 @@
+interface:
+  display_name: "zh-TW Conventional Commits"
+  short_description: "Write commit messages in zh-TW"
+  default_prompt: "Use $zh-tw-conventional-commits when preparing git commit messages in this repo so they follow Conventional Commits and use zh-TW wording."
+
+policy:
+  allow_implicit_invocation: true

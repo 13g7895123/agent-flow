@@ -1,0 +1,7 @@
+interface:
+  display_name: "Skill Location Policy"
+  short_description: "Keep repo skills under docs/skills"
+  default_prompt: "Use $skill-location-policy when creating or updating repository-local skills so every new skill is placed under docs/skills."
+
+policy:
+  allow_implicit_invocation: true
