@@ -35,3 +35,6 @@ Thumbs.db
 .codex/
 .claude/
 docs/skills/.system
+
+# Git worktree
+worktree/
