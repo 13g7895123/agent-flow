@@ -163,7 +163,7 @@ describe('forms and page states', () => {
 
     const { container } = renderUi(<ProjectsPage />)
 
-    expect(container.querySelector('.animate-spin')).toBeTruthy()
+    expect(container.querySelector('.animate-pulse')).toBeTruthy()
   })
 
   it('shows the projects empty state', () => {

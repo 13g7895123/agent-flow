@@ -36,8 +36,11 @@ export function ProjectForm({
   const validate = () => {
     const e: Partial<ProjectFormData> = {}
     if (!form.name.trim())       e.name       = '請輸入專案名稱'
-    if (!form.path.trim())       e.path       = '請輸入專案路徑'
-    if (!form.path.trim().startsWith('/')) e.path = '專案路徑必須是絕對路徑，如 /home/user/project'
+    if (!form.path.trim()) {
+      e.path = '請輸入專案路徑'
+    } else if (!form.path.trim().startsWith('/')) {
+      e.path = '專案路徑必須是絕對路徑，如 /home/user/project'
+    }
     if (!form.pipelineId)        e.pipelineId = '請選擇 Pipeline'
     setErrors(e)
     return Object.keys(e).length === 0
