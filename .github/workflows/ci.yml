@@ -1,0 +1,265 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  web-lint:
+    name: Web - Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Run eslint
+        working-directory: web
+        run: bun run lint
+
+  web-build:
+    name: Web - Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Build
+        working-directory: web
+        run: bun run build
+
+  web-test:
+    name: Web - Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Run tests
+        working-directory: web
+        run: bun test
+
+  rust-fmt:
+    name: Rust - Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check formatting
+        working-directory: backend-rust
+        run: cargo fmt -- --check
+
+  rust-clippy:
+    name: Rust - Clippy Lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run clippy
+        working-directory: backend-rust
+        run: cargo clippy --all-targets -- -D warnings
+
+  rust-test:
+    name: Rust - Unit Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: agent_flow
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        working-directory: backend-rust
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/agent_flow
+          REDIS_URL: redis://localhost:6379
+        run: cargo test --lib
+
+  docker-build:
+    name: Docker - Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build with docker compose
+        run: docker compose build
+        env:
+          DOCKER_BUILDKIT: 1
+          COMPOSE_DOCKER_CLI_BUILD: 1
+
+  e2e-tests:
+    name: E2E - Playwright Tests
+    runs-on: ubuntu-latest
+    needs: [web-build, rust-test]
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: agent_flow
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build web
+        working-directory: web
+        run: bun run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust backend
+        working-directory: backend-rust
+        run: cargo build --release
+
+      - name: Start backend services
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/agent_flow
+          REDIS_URL: redis://localhost:6379
+        working-directory: backend-rust
+        run: |
+          timeout 120 cargo run --release &
+          sleep 2
+        timeout-minutes: 5
+
+      - name: Wait for backend to be ready
+        run: |
+          for i in {1..60}; do
+            if curl -s http://localhost:3001/api/health > /dev/null; then
+              echo "Backend is ready"
+              exit 0
+            fi
+            echo "Waiting for backend... ($i/60)"
+            sleep 1
+          done
+          echo "Backend failed to start"
+          exit 1
+
+      - name: Run E2E tests
+        working-directory: web
+        run: bun run test:e2e
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 30
+
+  all-checks:
+    name: All Checks Passed
+    runs-on: ubuntu-latest
+    needs:
+      - web-lint
+      - web-build
+      - web-test
+      - rust-fmt
+      - rust-clippy
+      - rust-test
+      - docker-build
+      - e2e-tests
+    if: always()
+    steps:
+      - name: Decide whether all checks passed
+        run: |
+          if [ "${{ needs.web-lint.result }}" != "success" ] || \
+             [ "${{ needs.web-build.result }}" != "success" ] || \
+             [ "${{ needs.web-test.result }}" != "success" ] || \
+             [ "${{ needs.rust-fmt.result }}" != "success" ] || \
+             [ "${{ needs.rust-clippy.result }}" != "success" ] || \
+             [ "${{ needs.rust-test.result }}" != "success" ] || \
+             [ "${{ needs.docker-build.result }}" != "success" ] || \
+             [ "${{ needs.e2e-tests.result }}" != "success" ]; then
+            exit 1
+          fi
