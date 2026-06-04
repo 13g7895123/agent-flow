@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, FolderOpen, Pencil, Trash2, ChevronRight } from 'lucide-react'
 import { useProjects, useCreateProject, useUpdateProject, useDeleteProject } from '@/hooks/useProjects'
 import { usePipelines } from '@/hooks/usePipelines'
+import { useToast } from '@/components/ui/ToastProvider'
+import { FormErrorSummary } from '@/components/forms/FormErrorSummary'
+import { ApiErrorAlert } from '@/components/forms/ApiErrorAlert'
+import { SkeletonCard } from '@/components/ui/SkeletonCard'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -22,7 +26,9 @@ export function ProjectForm({
 }) {
   const [form, setForm] = useState<ProjectFormData>(initial ?? defaultForm)
   const [errors, setErrors] = useState<Partial<ProjectFormData>>({})
+  const [apiError, setApiError] = useState<string>('')
   const { data: pipelines = [] } = usePipelines()
+  const toast = useToast()
 
   const set = (k: keyof ProjectFormData, v: string) =>
     setForm(f => ({ ...f, [k]: v }))
@@ -31,6 +37,7 @@ export function ProjectForm({
     const e: Partial<ProjectFormData> = {}
     if (!form.name.trim())       e.name       = '請輸入專案名稱'
     if (!form.path.trim())       e.path       = '請輸入專案路徑'
+    if (!form.path.trim().startsWith('/')) e.path = '專案路徑必須是絕對路徑，如 /home/user/project'
     if (!form.pipelineId)        e.pipelineId = '請選擇 Pipeline'
     setErrors(e)
     return Object.keys(e).length === 0
@@ -38,11 +45,28 @@ export function ProjectForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (validate()) onSubmit(form)
+    setApiError('')
+    if (validate()) {
+      try {
+        onSubmit(form)
+        toast.addToast(
+          initial ? '專案已更新' : '專案已建立',
+          'success'
+        )
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '發生錯誤'
+        setApiError(message)
+        toast.addToast(message, 'error')
+      }
+    }
   }
+
+  const errorMessages = Object.values(errors).filter(Boolean) as string[]
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      {apiError && <ApiErrorAlert error={apiError} onDismiss={() => setApiError('')} />}
+      {errorMessages.length > 0 && <FormErrorSummary errors={errorMessages} />}
       <Input
         label="專案名稱" required
         value={form.name} onChange={e => set('name', e.target.value)}
@@ -85,6 +109,7 @@ export function ProjectForm({
 
 export function ProjectsPage() {
   const navigate = useNavigate()
+  const toast = useToast()
   const { data: projects = [], isLoading } = useProjects()
   const create = useCreateProject()
   const update = useUpdateProject()
@@ -95,23 +120,58 @@ export function ProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
 
   const handleCreate = (data: ProjectFormData) => {
-    create.mutate(data, { onSuccess: () => setCreateOpen(false) })
+    create.mutate(data, {
+      onSuccess: () => {
+        setCreateOpen(false)
+        toast.addToast('專案已建立', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法建立專案'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   const handleUpdate = (data: ProjectFormData) => {
     if (!editTarget) return
-    update.mutate({ id: editTarget.id, data }, { onSuccess: () => setEditTarget(null) })
+    update.mutate({ id: editTarget.id, data }, {
+      onSuccess: () => {
+        setEditTarget(null)
+        toast.addToast('專案已更新', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法更新專案'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   const handleDelete = () => {
     if (!deleteTarget) return
-    del.mutate(deleteTarget.id, { onSuccess: () => setDeleteTarget(null) })
+    del.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null)
+        toast.addToast('專案已刪除', 'success')
+      },
+      onError: (error: any) => {
+        const message = error?.message || '無法刪除專案'
+        toast.addToast(message, 'error')
+      }
+    })
   }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <span className="w-6 h-6 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
+      <div className="animate-fade-in">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-xl font-semibold">專案</h1>
+            <p className="text-sm text-[var(--color-muted)] mt-1">管理你的 AI 任務執行專案</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <SkeletonCard count={6} className="bg-[var(--color-surface)]" />
+        </div>
       </div>
     )
   }

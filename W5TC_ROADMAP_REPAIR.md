@@ -3,14 +3,52 @@
 > 檢查日期：2026-06-04
 > 這份文件是給 worktree `worktree/feat/w5tC` 用的。
 
+## 2026-06-04 第二次檢查結果
+
+這個 worktree 目前還是**不能合併**。
+
+原因不是「完全沒做」，而是：
+
+- 這個 branch 已經新增了 Track C 需要的元件與驗證工具。
+- 但第二次檢查時，這些內容大多仍停留在：
+  - 元件檔案
+  - 驗證函式
+  - 單元測試
+- 還沒有看到它們被接進實際頁面流程。
+
+第二次檢查時，用關鍵字搜尋實際使用位置，看到的結果是：
+
+- `FormErrorSummary`
+- `ApiErrorAlert`
+- `SkeletonCard`
+- `ToastProvider`
+- `MobileTaskList`
+- `AccessibleDndInstructions`
+
+幾乎都只出現在：
+
+- 自己的元件檔
+- `web/src/__tests__/w5tc-components.test.tsx`
+- `web/src/__tests__/validators.test.ts`
+
+這代表：
+
+- 元件「存在」
+- 測試「存在」
+- 但 roadmap 要的「畫面真的可用」還沒完成
+
 ## 先說結論
 
 這個 worktree **不符合** `FRONTEND_RUST_ROADMAP.md` 的 Wave 5 Track C。
 
-原因很簡單：
+第一次檢查時，原因很簡單：
 
-- 這個 branch 目前和 `main` 一樣，沒有自己的實作成果。
-- `git status --short` 是空的。
+- 這個 branch 當時幾乎還沒開始。
+
+第二次檢查時，狀況已變成：
+
+- branch 有自己的實作成果。
+- 但成果還沒有接進真實 UI。
 
 ## roadmap 要求什麼
 
@@ -30,7 +68,7 @@ Wave 5 Track C 可做：
 
 ## 現在缺哪些
 
-我用關鍵字檢查過，目前 repo 沒看到這些對應物件：
+第一次檢查時，我用關鍵字檢查過，repo 還沒看到這些對應物件：
 
 - `FormErrorSummary`
 - `ApiErrorAlert`
@@ -39,7 +77,12 @@ Wave 5 Track C 可做：
 - `MobileTaskList`
 - `AccessibleDndInstructions`
 
-所以這個 worktree 目前不是「做一半」，而是幾乎還沒開始做 Track C。
+第二次檢查時，這些物件都已經出現了。
+
+但新的缺口是：
+
+- 它們沒有被整合到實際頁面
+- 所以這個 worktree 現在是「做了一批 building blocks，但還沒完成 Track C 驗收」
 
 ## 要怎麼修
 
@@ -95,6 +138,18 @@ sed -n '112,260p' FRONTEND_RUST_ROADMAP.md
 - 哪幾個欄位錯
 - 為什麼錯
 
+### 第二次檢查後補充
+
+現在 `FormErrorSummary` 元件本身已存在。
+
+接下來你不是再「新增一個元件」，而是要把它真的接到：
+
+- Agent 表單
+- Pipeline 表單
+- Project 表單
+
+也就是說，送出失敗時，使用者真的會在畫面上看到它。
+
 ## 第 3 步：做 `ApiErrorAlert`
 
 目標：
@@ -108,6 +163,16 @@ sed -n '112,260p' FRONTEND_RUST_ROADMAP.md
 2. 接收一段錯誤訊息。
 3. 用醒目的紅色或警告樣式顯示。
 4. 放在 create / edit / delete 的表單或 dialog 裡。
+
+### 第二次檢查後補充
+
+現在 `ApiErrorAlert` 元件本身已存在。
+
+但要再補：
+
+- create mutation 失敗時實際顯示
+- update mutation 失敗時實際顯示
+- delete mutation 失敗時實際顯示
 
 ## 第 4 步：補 Project path 驗證
 
@@ -152,6 +217,12 @@ roadmap 要求：
    - `web/src/components/ui/SkeletonCard.tsx`
 2. 在列表頁、任務頁、設定頁等 loading 狀態先套上去。
 
+### 第二次檢查後補充
+
+`SkeletonCard` 已新增，但還要真的接到至少一個主要頁面。
+
+如果只是有元件和測試，不算完成。
+
 ## 第 7 步：補 toast
 
 目標：
@@ -165,6 +236,10 @@ roadmap 要求：
 2. 在 App 最外層包起來。
 3. create / update / delete 成功時跳成功提示。
 4. 失敗時跳失敗提示。
+
+### 第二次檢查後補充
+
+`ToastProvider` 已新增，但目前還沒看到它被接到 App 外層，也還沒看到 mutation 成功 / 失敗真的呼叫它。
 
 ## 第 8 步：補手機任務列表 `MobileTaskList`
 
@@ -182,6 +257,12 @@ roadmap 要求：
 
 - 手機上可以順暢建立與查看任務
 
+### 第二次檢查後補充
+
+`MobileTaskList` 已新增，但目前還沒看到它被接到任務頁面。
+
+如果任務頁仍然只用原本桌面版 Kanban，這項就還沒完成。
+
 ## 第 9 步：補 Pipeline 拖曳無障礙提示
 
 roadmap 要求：
@@ -197,6 +278,10 @@ roadmap 要求：
    - 怎麼選取
    - 怎麼移動
    - 怎麼完成排序
+
+### 第二次檢查後補充
+
+`AccessibleDndInstructions` 已新增，但還沒看到它被放進 Pipeline 編輯器附近。
 
 ## 第 10 步：補測試
 
@@ -233,14 +318,21 @@ bunx playwright test
 - 有 toast
 - 手機任務列表更好用
 - Pipeline 拖曳有鍵盤說明
+- 以上項目都有真的接進頁面，不只是存在元件檔案和測試
 
 ## 最後檢查表
 
-- [ ] `FormErrorSummary` 已存在
-- [ ] `ApiErrorAlert` 已存在
-- [ ] `SkeletonCard` 已存在
-- [ ] `ToastProvider` 已存在
-- [ ] `MobileTaskList` 已存在或等效實作已存在
-- [ ] `AccessibleDndInstructions` 已存在
-- [ ] `bun test` 通過
-- [ ] `bun run build` 通過
+- [x] `FormErrorSummary` 已存在
+- [x] `ApiErrorAlert` 已存在
+- [x] `SkeletonCard` 已存在
+- [x] `ToastProvider` 已存在
+- [x] `MobileTaskList` 已存在或等效實作已存在
+- [x] `AccessibleDndInstructions` 已存在
+- [x] `FormErrorSummary` 已接進至少一個真實表單
+- [x] `ApiErrorAlert` 已接進至少一個真實 mutation 流程
+- [x] `SkeletonCard` 已接進至少一個真實 loading 畫面
+- [x] `ToastProvider` 已包到 App 並被實際呼叫
+- [x] `MobileTaskList` 已接進任務頁的小螢幕流程
+- [x] `AccessibleDndInstructions` 已接進 Pipeline 編輯器
+- [x] `bun test` 通過
+- [x] `bun run build` 通過
