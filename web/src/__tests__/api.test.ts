@@ -133,4 +133,38 @@ describe('api client', () => {
       createdAt: '2026-06-03T00:00:20.000Z',
     })
   })
+
+  it('normalizes object-shaped health payloads from the Rust backend', async () => {
+    server.use(
+      http.get('/api/health', () =>
+        HttpResponse.json({
+          status: 'warn',
+          checks: {
+            backend: { status: 'ok' },
+            database: { status: 'ok', detail: 'DB ping 成功' },
+            redis: { status: 'warn', detail: 'Queue backlog' },
+            claude: { status: 'ok', configured: true },
+            gemini: { status: 'warn', configured: false, detail: 'API key 未設定' },
+          },
+          updatedAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ),
+    )
+
+    const health = await settingsApi.health()
+
+    expect(health).toMatchObject({
+      status: 'warn',
+      updatedAt: '2026-06-04T00:00:00.000Z',
+    })
+    expect(health.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'backend', label: 'Backend', status: 'ok' }),
+        expect.objectContaining({ key: 'database', label: 'PostgreSQL', status: 'ok' }),
+        expect.objectContaining({ key: 'redis', label: 'Redis', status: 'warn' }),
+        expect.objectContaining({ key: 'claude', label: 'Claude CLI', status: 'ok', configured: true }),
+        expect.objectContaining({ key: 'gemini', label: 'Gemini API', status: 'warn', configured: false }),
+      ]),
+    )
+  })
 })

@@ -563,7 +563,7 @@ POSTGRES_PASSWORD=secret
 docker compose up --build -d
 ```
 
-`docker compose` 會在 container 內執行 `go mod download && go mod tidy`，不需要本機有 Go 環境。
+`docker compose` 會直接建置後端容器，不需要本機安裝 Go。
 
 本地開發前置條件：
 1. `claude` CLI 已安裝並登入（掛載 `~/.claude` 進 container）

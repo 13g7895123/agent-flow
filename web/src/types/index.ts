@@ -207,6 +207,7 @@ export interface HealthCheckItem {
   label: string
   status: ServiceStatus
   detail?: string
+  configured?: boolean
 }
 
 export interface HealthResponse {
