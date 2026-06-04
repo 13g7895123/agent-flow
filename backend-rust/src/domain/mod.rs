@@ -37,6 +37,7 @@ impl TaskStatus {
 pub enum RunPhase {
     Step,
     Fix,
+    Verification,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -262,10 +263,27 @@ pub struct ExecutionRun {
     pub id: String,
     pub task_id: String,
     pub step_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub agent_name: String,
     pub phase: RunPhase,
     pub run_index: u32,
+    pub prompt_sent: String,
     pub output: String,
-    pub exit_code: i32,
+    pub error_message: String,
+    pub exit_code: Option<i32>,
+    pub success: Option<bool>,
+    pub duration_ms: Option<u64>,
     pub started_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLog {
+    pub id: String,
+    pub execution_run_id: String,
+    pub sequence: u32,
+    pub log_type: LogType,
+    pub content: String,
+    pub timestamp: DateTime<Utc>,
 }
