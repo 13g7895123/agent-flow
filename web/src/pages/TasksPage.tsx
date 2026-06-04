@@ -75,7 +75,7 @@ function TaskCard({
   task, onDetail,
 }: {
   task: Task
-  onDetail: (t: Task) => void
+  onDetail: (id: string) => void
 }) {
   const cancel = useCancelTask()
   const retry  = useRetryTask()
@@ -85,10 +85,10 @@ function TaskCard({
   return (
     <div
       className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-md)] p-4 flex flex-col gap-3 hover:border-[var(--color-accent)] transition-colors duration-150 cursor-pointer animate-fade-in"
-      onClick={() => onDetail(task)}
+      onClick={() => onDetail(task.id)}
       role="button"
       tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && onDetail(task)}
+      onKeyDown={e => e.key === 'Enter' && onDetail(task.id)}
       aria-label={`查看任務詳情：${task.prompt.slice(0, 40)}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -140,72 +140,6 @@ function TaskCard({
   )
 }
 
-// ── Task Detail Modal ────────────────────────────────────────────────────
-
-function TaskDetailModal({ task, onClose }: { task: Task | null; onClose: () => void }) {
-  if (!task) return null
-  const snapshot = task.pipelineSnapshot
-
-  return (
-    <Modal open={!!task} onClose={onClose} title="任務詳情" size="lg">
-      <div className="flex flex-col gap-5">
-        {/* Status + retry */}
-        <div className="flex items-center gap-3">
-          <StatusBadge status={task.status} />
-          <span className="text-sm text-[var(--color-muted)]">
-            重試 {task.currentRetry} / {task.maxRetries} 次
-          </span>
-        </div>
-
-        {/* Prompt */}
-        <div>
-          <p className="text-xs font-medium text-[var(--color-muted)] mb-1.5">任務提示詞</p>
-          <p className="text-sm bg-[var(--color-surface-2)] rounded-[var(--radius-md)] p-3 leading-relaxed">
-            {task.prompt}
-          </p>
-        </div>
-
-        {/* Pipeline steps */}
-        <div>
-          <p className="text-xs font-medium text-[var(--color-muted)] mb-2">
-            Pipeline：{snapshot.name}
-          </p>
-          <div className="flex flex-col gap-2">
-            {snapshot.steps.map((step, i) => {
-              const output = task.stepOutputs?.[step.id]
-              return (
-                <div key={step.id} className="border border-[var(--color-border)] rounded-[var(--radius-md)] overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-[var(--color-surface-2)]">
-                    <span className="w-5 h-5 rounded-full bg-[var(--color-accent)] text-white text-xs flex items-center justify-center shrink-0">
-                      {i + 1}
-                    </span>
-                    <span className="text-sm font-medium">{step.agent.name}</span>
-                    {step.label && (
-                      <span className="text-xs text-[var(--color-muted)]">({step.label})</span>
-                    )}
-                    {output && (
-                      <span className="ml-auto text-xs text-[var(--color-accent)]">✓ 完成</span>
-                    )}
-                  </div>
-                  {output && (
-                    <div className="px-3 py-2 bg-[var(--color-background)] log-terminal text-xs max-h-32 overflow-y-auto">
-                      {output}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Live log */}
-        <TaskLogViewer taskId={task.id} status={task.status} />
-
-        <p className="text-xs text-[var(--color-muted)]">建立於 {formatRelative(task.createdAt)}</p>
-      </div>
-    </Modal>
-  )
-}
 
 // ── Create Task Form ──────────────────────────────────────────────────────
 
@@ -253,10 +187,13 @@ export function TasksPage() {
   const create = useCreateTask()
 
   const [createOpen, setCreateOpen] = useState(false)
-  const [detailTask, setDetailTask] = useState<Task | null>(null)
 
   const handleCreate = (data: TaskFormData) => {
     create.mutate({ projectId, data }, { onSuccess: () => setCreateOpen(false) })
+  }
+
+  const handleTaskDetail = (taskId: string) => {
+    navigate(`/tasks/${taskId}`)
   }
 
   const tasksByStatus = (status: TaskStatus) => tasks.filter(t => t.status === status)
@@ -325,7 +262,7 @@ export function TasksPage() {
                 </div>
                 <div className="flex flex-col gap-3 min-h-24">
                   {colTasks.map(task => (
-                    <TaskCard key={task.id} task={task} onDetail={setDetailTask} />
+                    <TaskCard key={task.id} task={task} onDetail={handleTaskDetail} />
                   ))}
                 </div>
               </div>
@@ -338,8 +275,6 @@ export function TasksPage() {
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="新增任務">
         <CreateTaskForm onSubmit={handleCreate} loading={create.isPending} />
       </Modal>
-
-      <TaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} />
     </div>
   )
 }
