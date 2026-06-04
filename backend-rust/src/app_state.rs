@@ -9,8 +9,12 @@ use crate::domain::{
 use crate::events::{TaskEvent, TaskEventBus};
 use chrono::Utc;
 use std::collections::{BTreeMap, HashMap};
+use std::process::Stdio;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{watch, Mutex};
+use tokio::time::Instant;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -27,18 +31,14 @@ struct Store {
     tasks: HashMap<String, Task>,
     runs: HashMap<String, Vec<ExecutionRun>>,
     logs: HashMap<String, Vec<AgentLog>>,
+    cancels: HashMap<String, watch::Sender<bool>>,
     next_seq: u64,
 }
 
 impl Store {
-    fn next_sequence(&mut self) -> u64 {
-        let sequence = self.next_seq;
-        self.next_seq += 1;
-        sequence
-    }
-
     fn next_id(&mut self, prefix: &str) -> String {
-        let id = format!("{}-{}", prefix, self.next_sequence());
+        let id = format!("{}-{}", prefix, self.next_seq);
+        self.next_seq += 1;
         id
     }
 }
@@ -129,6 +129,7 @@ impl AppState {
                 tasks: HashMap::new(),
                 runs: HashMap::new(),
                 logs: HashMap::new(),
+                cancels: HashMap::new(),
                 next_seq: 10,
             })),
             queue: Arc::new(None),
@@ -151,6 +152,87 @@ impl AppState {
             self.event_bus
                 .publish(TaskEvent::done(task.id.clone(), task.status.clone()));
         }
+    }
+
+    fn publish_log(&self, task_id: &str, log_type: LogType, content: String, sequence: u32) {
+        self.event_bus.publish(TaskEvent::Log {
+            task_id: task_id.to_string(),
+            log_type,
+            content,
+            sequence: sequence as u64,
+        });
+    }
+
+    async fn register_cancel_handle(&self, task_id: &str) -> watch::Receiver<bool> {
+        let mut store = self.store.lock().await;
+        let (tx, rx) = watch::channel(false);
+        store.cancels.insert(task_id.to_string(), tx);
+        rx
+    }
+
+    async fn signal_cancel(&self, task_id: &str) {
+        let store = self.store.lock().await;
+        if let Some(sender) = store.cancels.get(task_id) {
+            let _ = sender.send(true);
+        }
+    }
+
+    async fn clear_cancel_handle(&self, task_id: &str) {
+        let mut store = self.store.lock().await;
+        store.cancels.remove(task_id);
+    }
+
+    async fn insert_run(&self, task_id: &str, run: ExecutionRun) {
+        let mut store = self.store.lock().await;
+        store.runs.entry(task_id.to_string()).or_default().push(run);
+    }
+
+    async fn update_run<F>(&self, task_id: &str, run_id: &str, mut f: F)
+    where
+        F: FnMut(&mut ExecutionRun),
+    {
+        let mut store = self.store.lock().await;
+        if let Some(runs) = store.runs.get_mut(task_id) {
+            if let Some(run) = runs.iter_mut().find(|run| run.id == run_id) {
+                f(run);
+            }
+        }
+    }
+
+    async fn insert_log(&self, task_id: &str, run_id: &str, log_type: LogType, content: String) {
+        let mut store = self.store.lock().await;
+        let log_id = store.next_id("log");
+        let logs = store.logs.entry(run_id.to_string()).or_default();
+        let sequence = logs.len() as u32 + 1;
+        logs.push(AgentLog {
+            id: log_id,
+            execution_run_id: run_id.to_string(),
+            sequence,
+            log_type: log_type.clone(),
+            content: content.clone(),
+            timestamp: Utc::now(),
+        });
+        drop(store);
+        self.publish_log(task_id, log_type, content, sequence);
+    }
+
+    async fn set_task_status(
+        &self,
+        id: &str,
+        status: TaskStatus,
+        completed_at: Option<chrono::DateTime<Utc>>,
+    ) -> Option<Task> {
+        let task = {
+            let mut store = self.store.lock().await;
+            let task = store.tasks.get_mut(id)?;
+            task.status = status;
+            task.completed_at = completed_at;
+            task.updated_at = Utc::now();
+            task.clone()
+        };
+
+        self.publish_task_status(&task);
+        Some(task)
     }
 
     pub fn with_queue(mut self, queue: crate::queue::TaskQueue) -> Self {
@@ -557,17 +639,15 @@ impl AppState {
     }
 
     pub async fn cancel_task(&self, id: &str) -> Option<Task> {
-        let task = {
-            let mut store = self.store.lock().await;
-            let task = store.tasks.get_mut(id)?;
-            let now = Utc::now();
-            task.status = TaskStatus::Cancelled;
-            task.completed_at = Some(now);
-            task.updated_at = now;
-            task.clone()
-        };
+        let current = self.get_task(id).await?;
+        if current.status.is_terminal() {
+            return Some(current);
+        }
 
-        self.publish_task_status(&task);
+        let task = self
+            .set_task_status(id, TaskStatus::Cancelled, Some(Utc::now()))
+            .await?;
+        self.signal_cancel(id).await;
         Some(task)
     }
 
@@ -597,118 +677,6 @@ impl AppState {
         Some(runs)
     }
 
-    pub async fn update_task_status(&self, id: &str, status: TaskStatus) -> Option<Task> {
-        let task = {
-            let mut store = self.store.lock().await;
-            let task = store.tasks.get_mut(id)?;
-            task.status = status;
-            task.updated_at = Utc::now();
-            task.clone()
-        };
-
-        self.publish_task_status(&task);
-        Some(task)
-    }
-
-    pub async fn set_task_completed(&self, id: &str, completed_at: Option<chrono::DateTime<Utc>>) {
-        let mut store = self.store.lock().await;
-        if let Some(task) = store.tasks.get_mut(id) {
-            task.completed_at = completed_at;
-            task.updated_at = Utc::now();
-        }
-    }
-
-    pub async fn start_run(
-        &self,
-        task_id: &str,
-        step_id: Option<String>,
-        phase: RunPhase,
-    ) -> Option<ExecutionRun> {
-        let mut store = self.store.lock().await;
-        if !store.tasks.contains_key(task_id) {
-            return None;
-        }
-
-        let run_index = store
-            .runs
-            .get(task_id)
-            .map(|runs| runs.len() as u32 + 1)
-            .unwrap_or(1);
-        let id = store.next_id("run");
-        let started_at = Utc::now();
-        let run = ExecutionRun {
-            id: id.clone(),
-            task_id: task_id.to_string(),
-            step_id,
-            phase,
-            run_index,
-            output: String::new(),
-            exit_code: 0,
-            started_at,
-            completed_at: None,
-        };
-
-        store
-            .runs
-            .entry(task_id.to_string())
-            .or_default()
-            .push(run.clone());
-        store.logs.entry(id).or_default();
-        Some(run)
-    }
-
-    pub async fn finish_run(
-        &self,
-        run_id: &str,
-        output: String,
-        exit_code: i32,
-        completed_at: Option<chrono::DateTime<Utc>>,
-    ) -> Option<ExecutionRun> {
-        let mut store = self.store.lock().await;
-        for runs in store.runs.values_mut() {
-            if let Some(run) = runs.iter_mut().find(|run| run.id == run_id) {
-                run.output = output;
-                run.exit_code = exit_code;
-                run.completed_at = completed_at.or_else(|| Some(Utc::now()));
-                return Some(run.clone());
-            }
-        }
-        None
-    }
-
-    pub async fn append_run_log(
-        &self,
-        run_id: &str,
-        log_type: LogType,
-        content: String,
-    ) -> Option<AgentLog> {
-        let mut store = self.store.lock().await;
-        let run_exists = store
-            .runs
-            .values()
-            .any(|runs| runs.iter().any(|run| run.id == run_id));
-        if !run_exists {
-            return None;
-        }
-
-        let sequence = store.next_sequence();
-        let log = AgentLog {
-            id: format!("log-{}", sequence),
-            run_id: run_id.to_string(),
-            sequence,
-            log_type,
-            content,
-            created_at: Utc::now(),
-        };
-
-        store
-            .logs
-            .entry(run_id.to_string())
-            .or_default()
-            .push(log.clone());
-        Some(log)
-    }
-
     pub async fn get_run(&self, run_id: &str) -> Option<ExecutionRun> {
         let store = self.store.lock().await;
         store
@@ -721,14 +689,649 @@ impl AppState {
 
     pub async fn list_run_logs(&self, run_id: &str) -> Option<Vec<AgentLog>> {
         let store = self.store.lock().await;
-        let _ = store
-            .runs
-            .values()
-            .flat_map(|runs| runs.iter())
-            .find(|run| run.id == run_id)?;
+        self
+            .get_run_from_store(&store, run_id)
+            .map(|_| ())
+            ?;
 
         let mut logs = store.logs.get(run_id).cloned().unwrap_or_default();
         logs.sort_by(|a, b| a.sequence.cmp(&b.sequence));
         Some(logs)
+    }
+
+    pub async fn update_task_status(&self, id: &str, status: TaskStatus) {
+        let _ = self.set_task_status(id, status, None).await;
+    }
+
+    pub async fn set_task_completed(&self, id: &str, completed_at: Option<chrono::DateTime<Utc>>) {
+        let mut store = self.store.lock().await;
+        if let Some(task) = store.tasks.get_mut(id) {
+            task.completed_at = completed_at;
+            task.updated_at = Utc::now();
+        }
+    }
+
+    pub async fn execute_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let cancel_rx = self.register_cancel_handle(task_id).await;
+        let task = self
+            .get_task(task_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
+
+        if task.status.is_terminal() {
+            self.clear_cancel_handle(task_id).await;
+            return Ok(());
+        }
+
+        let project = self
+            .get_project(&task.project_id)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+
+        let mut task = task;
+        task.status = TaskStatus::Running;
+        task.updated_at = Utc::now();
+        {
+            let mut store = self.store.lock().await;
+            if let Some(existing) = store.tasks.get_mut(task_id) {
+                existing.status = TaskStatus::Running;
+                existing.updated_at = task.updated_at;
+            }
+        }
+        self.publish_task_status(&task);
+
+        let mut run_index = 1u32;
+        let mut step_outputs: BTreeMap<String, String> = task.step_outputs.clone();
+        let mut previous_output = String::new();
+
+        let mut steps = task.pipeline_snapshot.steps.clone();
+        steps.sort_by(|a, b| a.order.cmp(&b.order));
+
+        for step in steps {
+            if *cancel_rx.borrow() {
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Cancelled, Some(Utc::now()))
+                    .await;
+                self.clear_cancel_handle(task_id).await;
+                return Ok(());
+            }
+
+            let prompt =
+                self.build_step_prompt(&task, &project, &step, &step_outputs, &previous_output);
+            self.publish_task_event_step_start(task_id, step.order, &step.agent.name, &step.label);
+
+            let run = self
+                .new_run(
+                    task_id,
+                    Some(step.id.clone()),
+                    Some(step.agent.id.clone()),
+                    &step.agent.name,
+                    RunPhase::Step,
+                    run_index,
+                    &prompt,
+                )
+                .await;
+
+            let result = match self
+                .run_model_prompt(
+                    task_id,
+                    &run.id,
+                    &step.agent,
+                    &prompt,
+                    &project.path,
+                    cancel_rx.clone(),
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    self.clear_cancel_handle(task_id).await;
+                    return Err(err);
+                }
+            };
+
+            let success = result.exit_code == 0;
+            self.finish_run(
+                task_id,
+                &run.id,
+                success,
+                result.exit_code,
+                result.stdout.clone(),
+                result.stderr.clone(),
+                None,
+                Some(result.duration_ms),
+            )
+            .await;
+
+            self.publish_task_event_step_done(task_id, step.order, &step.agent.name, success);
+
+            if !success {
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Failed, Some(Utc::now()))
+                    .await;
+                self.clear_cancel_handle(task_id).await;
+                return Err(anyhow::anyhow!("Step {} failed", step.order));
+            }
+
+            let combined = combine_output(&result.stdout, &result.stderr);
+            step_outputs.insert(step.id.clone(), combined.clone());
+            previous_output = combined;
+            run_index += 1;
+        }
+
+        {
+            let mut store = self.store.lock().await;
+            if let Some(existing) = store.tasks.get_mut(task_id) {
+                existing.step_outputs = step_outputs.clone();
+                existing.updated_at = Utc::now();
+            }
+        }
+
+        loop {
+            if *cancel_rx.borrow() {
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Cancelled, Some(Utc::now()))
+                    .await;
+                self.clear_cancel_handle(task_id).await;
+                return Ok(());
+            }
+
+            let verifying_run = self
+                .new_run(
+                    task_id,
+                    None,
+                    Some(task.pipeline_snapshot.fixer_agent.id.clone()),
+                    &task.pipeline_snapshot.fixer_agent.name,
+                    RunPhase::Verification,
+                    run_index,
+                    &project.test_command,
+                )
+                .await;
+
+            let verify_result = match self
+                .run_test_command(task_id, &verifying_run.id, &project, cancel_rx.clone())
+                .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    self.clear_cancel_handle(task_id).await;
+                    return Err(err);
+                }
+            };
+
+            let passed = verify_result.exit_code == 0;
+            self.finish_run(
+                task_id,
+                &verifying_run.id,
+                passed,
+                verify_result.exit_code,
+                verify_result.stdout.clone(),
+                verify_result.stderr.clone(),
+                None,
+                Some(verify_result.duration_ms),
+            )
+            .await;
+
+            if passed {
+                let now = Utc::now();
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Done, Some(now))
+                    .await;
+                self.set_task_completed(task_id, Some(now)).await;
+                self.clear_cancel_handle(task_id).await;
+                return Ok(());
+            }
+
+            let current_retry = {
+                let mut store = self.store.lock().await;
+                let task = store.tasks.get_mut(task_id).ok_or_else(|| {
+                    anyhow::anyhow!("Task {} disappeared during execution", task_id)
+                })?;
+                task.current_retry += 1;
+                task.current_retry
+            };
+
+            if current_retry > task.max_retries {
+                let now = Utc::now();
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Failed, Some(now))
+                    .await;
+                self.clear_cancel_handle(task_id).await;
+                return Err(anyhow::anyhow!("Max retries exceeded"));
+            }
+
+            let _ = self
+                .set_task_status(task_id, TaskStatus::Fixing, None)
+                .await;
+            run_index += 1;
+
+            let fix_prompt = self.build_fix_prompt(
+                &task,
+                &project,
+                &step_outputs,
+                &verify_result.stdout,
+                &previous_output,
+                current_retry,
+            );
+
+            let fix_run = self
+                .new_run(
+                    task_id,
+                    None,
+                    Some(task.pipeline_snapshot.fixer_agent.id.clone()),
+                    &task.pipeline_snapshot.fixer_agent.name,
+                    RunPhase::Fix,
+                    run_index,
+                    &fix_prompt,
+                )
+                .await;
+
+            let fix_result = match self
+                .run_fix_prompt(
+                    task_id,
+                    &fix_run.id,
+                    &task.pipeline_snapshot.fixer_agent,
+                    &fix_prompt,
+                    &project.path,
+                    cancel_rx.clone(),
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    self.clear_cancel_handle(task_id).await;
+                    return Err(err);
+                }
+            };
+
+            let fix_success = fix_result.exit_code == 0;
+            self.finish_run(
+                task_id,
+                &fix_run.id,
+                fix_success,
+                fix_result.exit_code,
+                fix_result.stdout.clone(),
+                fix_result.stderr.clone(),
+                None,
+                Some(fix_result.duration_ms),
+            )
+            .await;
+
+            if !fix_success {
+                let now = Utc::now();
+                let _ = self
+                    .set_task_status(task_id, TaskStatus::Failed, Some(now))
+                    .await;
+                self.clear_cancel_handle(task_id).await;
+                return Err(anyhow::anyhow!("Fix run failed"));
+            }
+
+            previous_output = combine_output(&fix_result.stdout, &fix_result.stderr);
+            run_index += 1;
+        }
+    }
+
+    fn build_step_prompt(
+        &self,
+        task: &Task,
+        project: &Project,
+        step: &StepSnapshot,
+        step_outputs: &BTreeMap<String, String>,
+        previous_output: &str,
+    ) -> String {
+        let mut prompt = String::new();
+        prompt.push_str(&format!("Project path: {}\n", project.path));
+        prompt.push_str(&format!("Test command: {}\n", project.test_command));
+        prompt.push_str(&format!("Task prompt: {}\n", task.prompt));
+        prompt.push_str(&format!("Pipeline step: {}\n", step.label));
+        if !previous_output.is_empty() {
+            prompt.push_str(&format!("Previous output:\n{}\n", previous_output));
+        }
+        if !step_outputs.is_empty() {
+            prompt.push_str("Step outputs:\n");
+            for (step_id, output) in step_outputs {
+                prompt.push_str(&format!("- {}:\n{}\n", step_id, output));
+            }
+        }
+        prompt.push_str(&step.agent.step_prompt);
+        prompt
+    }
+
+    fn build_fix_prompt(
+        &self,
+        task: &Task,
+        project: &Project,
+        step_outputs: &BTreeMap<String, String>,
+        last_error: &str,
+        previous_output: &str,
+        current_retry: i16,
+    ) -> String {
+        let mut prompt = String::new();
+        prompt.push_str(&format!("Project path: {}\n", project.path));
+        prompt.push_str(&format!("Test command: {}\n", project.test_command));
+        prompt.push_str(&format!("Task prompt: {}\n", task.prompt));
+        prompt.push_str(&format!(
+            "Current retry: {}/{}\n",
+            current_retry, task.max_retries
+        ));
+        if !previous_output.is_empty() {
+            prompt.push_str(&format!("Previous output:\n{}\n", previous_output));
+        }
+        prompt.push_str(&format!("Last error:\n{}\n", last_error));
+        if !step_outputs.is_empty() {
+            prompt.push_str("Step outputs:\n");
+            for (step_id, output) in step_outputs {
+                prompt.push_str(&format!("- {}:\n{}\n", step_id, output));
+            }
+        }
+        prompt.push_str(&task.pipeline_snapshot.fixer_agent.step_prompt);
+        prompt
+    }
+
+    fn publish_task_event_step_start(
+        &self,
+        task_id: &str,
+        step_order: u32,
+        agent_name: &str,
+        label: &str,
+    ) {
+        self.event_bus.publish(TaskEvent::StepStart {
+            task_id: task_id.to_string(),
+            step_order,
+            agent_name: agent_name.to_string(),
+            label: label.to_string(),
+        });
+    }
+
+    fn publish_task_event_step_done(
+        &self,
+        task_id: &str,
+        step_order: u32,
+        agent_name: &str,
+        success: bool,
+    ) {
+        self.event_bus.publish(TaskEvent::StepDone {
+            task_id: task_id.to_string(),
+            step_order,
+            agent_name: agent_name.to_string(),
+            success,
+        });
+    }
+
+    async fn new_run(
+        &self,
+        task_id: &str,
+        step_id: Option<String>,
+        agent_id: Option<String>,
+        agent_name: &str,
+        phase: RunPhase,
+        run_index: u32,
+        prompt_sent: &str,
+    ) -> ExecutionRun {
+        let run = ExecutionRun {
+            id: {
+                let mut store = self.store.lock().await;
+                store.next_id("run")
+            },
+            task_id: task_id.to_string(),
+            step_id,
+            agent_id,
+            agent_name: agent_name.to_string(),
+            phase,
+            run_index,
+            prompt_sent: prompt_sent.to_string(),
+            output: String::new(),
+            error_message: String::new(),
+            exit_code: None,
+            success: None,
+            duration_ms: None,
+            started_at: Utc::now(),
+            completed_at: None,
+        };
+        self.insert_run(task_id, run.clone()).await;
+        run
+    }
+
+    async fn finish_run(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        success: bool,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        error_message: Option<String>,
+        duration_ms: Option<u64>,
+    ) {
+        let output = combine_output(&stdout, &stderr);
+        let error_message = error_message.unwrap_or_else(|| {
+            if success {
+                String::new()
+            } else if !stderr.trim().is_empty() {
+                stderr.clone()
+            } else {
+                format!("exit code {}", exit_code)
+            }
+        });
+
+        self.update_run(task_id, run_id, |run| {
+            run.output = output.clone();
+            run.error_message = error_message.clone();
+            run.exit_code = Some(exit_code);
+            run.success = Some(success);
+            run.duration_ms = duration_ms;
+            run.completed_at = Some(Utc::now());
+        })
+        .await;
+    }
+
+    async fn run_test_command(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        project: &Project,
+        cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        self.run_shell_command(
+            task_id,
+            run_id,
+            &project.test_command,
+            &project.path,
+            cancel_rx,
+        )
+        .await
+    }
+
+    async fn run_shell_command(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        command: &str,
+        working_dir: &str,
+        cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        let mut cancel_rx = cancel_rx;
+        self.run_command(
+            task_id,
+            run_id,
+            "sh",
+            &["-c", command],
+            working_dir,
+            &mut cancel_rx,
+        )
+        .await
+    }
+
+    async fn run_fix_prompt(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        agent: &AgentSnapshot,
+        prompt: &str,
+        working_dir: &str,
+        cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        let _ = agent;
+        self.run_claude_command(task_id, run_id, prompt, working_dir, cancel_rx)
+            .await
+    }
+
+    async fn run_model_prompt(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        agent: &AgentSnapshot,
+        prompt: &str,
+        working_dir: &str,
+        cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        match &agent.model_provider {
+            ModelProvider::Claude => {
+                self.run_claude_command(task_id, run_id, prompt, working_dir, cancel_rx)
+                    .await
+            }
+            ModelProvider::Gemini => Err(anyhow::anyhow!("Gemini runner not yet implemented")),
+        }
+    }
+
+    async fn run_claude_command(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        prompt: &str,
+        working_dir: &str,
+        mut cancel_rx: watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        self.run_command(
+            task_id,
+            run_id,
+            "claude",
+            &["-p", prompt],
+            working_dir,
+            &mut cancel_rx,
+        )
+        .await
+    }
+
+    async fn run_command(
+        &self,
+        task_id: &str,
+        run_id: &str,
+        program: &str,
+        args: &[&str],
+        working_dir: &str,
+        cancel_rx: &mut watch::Receiver<bool>,
+    ) -> anyhow::Result<CommandResult> {
+        let started = Instant::now();
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .current_dir(working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = command.spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stderr"))?;
+
+        let stdout_buf = Arc::new(Mutex::new(String::new()));
+        let stderr_buf = Arc::new(Mutex::new(String::new()));
+
+        let stdout_task = self.spawn_reader(
+            task_id.to_string(),
+            run_id.to_string(),
+            stdout,
+            LogType::Stdout,
+            Arc::clone(&stdout_buf),
+        );
+        let stderr_task = self.spawn_reader(
+            task_id.to_string(),
+            run_id.to_string(),
+            stderr,
+            LogType::Stderr,
+            Arc::clone(&stderr_buf),
+        );
+
+        let exit_status = tokio::select! {
+            result = child.wait() => result?,
+            changed = cancel_rx.changed() => {
+                if changed.is_ok() {
+                    let _ = child.kill().await;
+                }
+                let _ = child.wait().await;
+                stdout_task.abort();
+                stderr_task.abort();
+                return Err(anyhow::anyhow!("task cancelled"));
+            }
+        };
+
+        let _ = stdout_task.await;
+        let _ = stderr_task.await;
+
+        let stdout = stdout_buf.lock().await.clone();
+        let stderr = stderr_buf.lock().await.clone();
+        Ok(CommandResult {
+            stdout,
+            stderr,
+            exit_code: exit_status.code().unwrap_or(-1),
+            duration_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    fn spawn_reader(
+        &self,
+        task_id: String,
+        run_id: String,
+        stream: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+        log_type: LogType,
+        output_buf: Arc<Mutex<String>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let state = self.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stream).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                {
+                    let mut buf = output_buf.lock().await;
+                    buf.push_str(&line);
+                    buf.push('\n');
+                }
+                state
+                    .insert_log(&task_id, &run_id, log_type.clone(), line)
+                    .await;
+            }
+        })
+    }
+}
+
+impl AppState {
+    fn get_run_from_store<'a>(&self, store: &'a Store, run_id: &str) -> Option<&'a ExecutionRun> {
+        store
+            .runs
+            .values()
+            .flat_map(|runs| runs.iter())
+            .find(|run| run.id == run_id)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CommandResult {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    duration_ms: u64,
+}
+
+fn combine_output(stdout: &str, stderr: &str) -> String {
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("{}\n{}", stdout.trim_end(), stderr.trim_end()),
     }
 }

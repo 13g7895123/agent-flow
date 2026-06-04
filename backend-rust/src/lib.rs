@@ -51,7 +51,9 @@ pub async fn build_state_with_workers() -> Arc<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{CreateTaskRequest, TaskStatus};
+    use crate::domain::{
+        CreatePipelineRequest, CreateProjectRequest, CreateTaskRequest, TaskStatus,
+    };
 
     #[tokio::test]
     async fn create_cancel_and_retry_task_updates_status() {
@@ -142,5 +144,108 @@ mod tests {
         let done_event = rx.recv().await.expect("done event for terminal status");
         assert_eq!(done_event.event_name(), "done");
         assert_eq!(done_event.task_id(), task.id);
+    }
+
+    #[tokio::test]
+    async fn execute_task_with_empty_pipeline_reaches_done() {
+        let state = AppState::new(Config::from_env());
+
+        let pipeline = state
+            .create_pipeline(CreatePipelineRequest {
+                name: "No Step Pipeline".to_string(),
+                description: Some("Verification only".to_string()),
+                fixer_agent_id: "agent-2".to_string(),
+                steps: vec![],
+            })
+            .await
+            .expect("pipeline should be created");
+
+        let project = state
+            .create_project(CreateProjectRequest {
+                name: "Temp Project".to_string(),
+                path: "/tmp".to_string(),
+                test_command: Some("echo test".to_string()),
+                pipeline_id: pipeline.id.clone(),
+            })
+            .await
+            .expect("project should be created");
+
+        let task = state
+            .create_task(
+                &project.id,
+                CreateTaskRequest {
+                    prompt: "Verify task".to_string(),
+                    max_retries: 1,
+                },
+            )
+            .await
+            .expect("task should be created");
+
+        state
+            .execute_task(&task.id)
+            .await
+            .expect("task should complete");
+
+        let completed = state.get_task(&task.id).await.expect("task exists");
+        assert_eq!(completed.status, TaskStatus::Done);
+        assert!(completed.completed_at.is_some());
+
+        let runs = state.list_runs(&task.id).await.expect("runs should exist");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].phase, crate::domain::RunPhase::Verification);
+        assert_eq!(runs[0].success, Some(true));
+    }
+
+    #[tokio::test]
+    async fn canceling_running_task_marks_it_cancelled() {
+        let state = AppState::new(Config::from_env());
+
+        let pipeline = state
+            .create_pipeline(CreatePipelineRequest {
+                name: "Cancelable Pipeline".to_string(),
+                description: Some("Verification only".to_string()),
+                fixer_agent_id: "agent-2".to_string(),
+                steps: vec![],
+            })
+            .await
+            .expect("pipeline should be created");
+
+        let project = state
+            .create_project(CreateProjectRequest {
+                name: "Cancelable Project".to_string(),
+                path: "/tmp".to_string(),
+                test_command: Some("sleep 2".to_string()),
+                pipeline_id: pipeline.id.clone(),
+            })
+            .await
+            .expect("project should be created");
+
+        let task = state
+            .create_task(
+                &project.id,
+                CreateTaskRequest {
+                    prompt: "Cancel me".to_string(),
+                    max_retries: 1,
+                },
+            )
+            .await
+            .expect("task should be created");
+
+        let state_for_worker = state.clone();
+        let task_id = task.id.clone();
+        let worker = tokio::spawn(async move { state_for_worker.execute_task(&task_id).await });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        state
+            .cancel_task(&task.id)
+            .await
+            .expect("task should cancel");
+
+        let result = worker.await.expect("worker task should join");
+        assert!(result.is_err(), "cancellation should surface as an error");
+
+        let cancelled = state.get_task(&task.id).await.expect("task exists");
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert!(cancelled.completed_at.is_some());
     }
 }

@@ -46,9 +46,26 @@ pub fn is_terminal(status: TaskStatus) -> bool {
     )
 }
 
+/// 依據執行結果決定下一個 task 狀態。
+pub fn next_status_after_verification_result(
+    current_retry: i16,
+    max_retries: i16,
+    passed: bool,
+) -> TaskStatus {
+    advance_after_verification(current_retry, max_retries, passed)
+}
+
+/// 判斷 task 是否仍可繼續進入修正流程。
+pub fn can_retry(current_retry: i16, max_retries: i16) -> bool {
+    current_retry < max_retries
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{advance_after_step_outcome, advance_after_verification, is_terminal, StepOutcome};
+    use super::{
+        advance_after_step_outcome, advance_after_verification, can_retry, is_terminal,
+        next_status_after_verification_result, StepOutcome,
+    };
     use crate::domain::TaskStatus;
 
     #[test]
@@ -93,5 +110,15 @@ mod tests {
         assert!(is_terminal(TaskStatus::Cancelled));
         assert!(!is_terminal(TaskStatus::Pending));
         assert!(!is_terminal(TaskStatus::Running));
+    }
+
+    #[test]
+    fn retry_budget_checks_are_consistent() {
+        assert!(can_retry(0, 1));
+        assert!(!can_retry(1, 1));
+        assert_eq!(
+            next_status_after_verification_result(0, 1, true),
+            TaskStatus::Done
+        );
     }
 }
