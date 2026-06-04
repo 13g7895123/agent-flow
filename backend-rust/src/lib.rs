@@ -3,6 +3,7 @@ pub mod app_state;
 pub mod config;
 pub mod domain;
 pub mod events;
+pub mod health;
 pub mod orchestrator;
 pub mod queue;
 pub mod runner;

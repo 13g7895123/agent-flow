@@ -17,6 +17,7 @@ use crate::{
         UpdateAgentRequest, UpdatePipelineRequest, UpdateProjectRequest,
     },
     events::TaskEvent,
+    health::{HealthReport, RuntimeConfigResponse},
 };
 
 type TaskSseStream = Pin<
@@ -26,6 +27,7 @@ type TaskSseStream = Pin<
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/runtime-config", get(runtime_config))
         // Agents
         .route("/api/agents", get(list_agents).post(create_agent))
         .route(
@@ -61,8 +63,12 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 // ── Health ────────────────────────────────────────────────────────────────
 
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok" }))
+async fn health(Extension(state): Extension<Arc<AppState>>) -> Json<HealthReport> {
+    Json(state.health_probe.check(&state.config).await)
+}
+
+async fn runtime_config(Extension(state): Extension<Arc<AppState>>) -> Json<RuntimeConfigResponse> {
+    Json(RuntimeConfigResponse::from(&state.config))
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────
