@@ -5,6 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use backend_rust::domain::{CreatePipelineRequest, CreateProjectRequest, CreateTaskRequest};
 use backend_rust::{build_app, build_state};
 use tower::ServiceExt; // for `oneshot`
 
@@ -135,4 +136,83 @@ async fn terminal_task_stream_emits_status_and_done() {
         body.contains("\"status\":\"cancelled\""),
         "done payload should reflect cancelled status: {body}"
     );
+}
+
+#[tokio::test]
+async fn runs_and_run_logs_endpoints_return_execution_history() {
+    let state = build_state();
+    let pipeline = state
+        .create_pipeline(CreatePipelineRequest {
+            name: "Verification Only".to_string(),
+            description: Some("Generate historical logs".to_string()),
+            fixer_agent_id: "agent-2".to_string(),
+            steps: vec![],
+        })
+        .await
+        .expect("pipeline should be created");
+
+    let project = state
+        .create_project(CreateProjectRequest {
+            name: "History Project".to_string(),
+            path: "/tmp".to_string(),
+            test_command: Some("sh -c 'echo worker started; echo warning: retrying 1>&2'".to_string()),
+            pipeline_id: pipeline.id,
+        })
+        .await
+        .expect("project should be created");
+
+    let task = state
+        .create_task(
+            &project.id,
+            CreateTaskRequest {
+                prompt: "Track execution history".to_string(),
+                max_retries: 0,
+            },
+        )
+        .await
+        .expect("task should be created");
+
+    state
+        .execute_task(&task.id)
+        .await
+        .expect("task should execute");
+
+    let app = build_app(state.clone());
+    let runs_resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/tasks/{}/runs", task.id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(runs_resp.status(), StatusCode::OK);
+    let runs_json: serde_json::Value =
+        serde_json::from_str(&body_to_string(runs_resp.into_body()).await).unwrap();
+    let runs = runs_json.as_array().expect("runs should be an array");
+    assert_eq!(runs.len(), 1);
+    let run_id = runs[0]["id"].as_str().expect("run should have id").to_string();
+    assert_eq!(runs[0]["taskId"], task.id);
+    assert_eq!(runs[0]["phase"], "verification");
+
+    let app = build_app(state.clone());
+    let logs_resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/runs/{run_id}/logs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logs_resp.status(), StatusCode::OK);
+    let logs_json: serde_json::Value =
+        serde_json::from_str(&body_to_string(logs_resp.into_body()).await).unwrap();
+    let logs = logs_json.as_array().expect("logs should be an array");
+    assert_eq!(logs.len(), 2);
+    assert_eq!(logs[0]["executionRunId"], run_id);
+    assert_eq!(logs[0]["logType"], "stdout");
+    assert_eq!(logs[0]["content"], "worker started");
+    assert_eq!(logs[1]["logType"], "stderr");
 }

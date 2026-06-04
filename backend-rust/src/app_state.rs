@@ -668,7 +668,35 @@ impl AppState {
 
     pub async fn list_runs(&self, task_id: &str) -> Option<Vec<ExecutionRun>> {
         let store = self.store.lock().await;
-        store.runs.get(task_id).cloned()
+        let mut runs = store.runs.get(task_id).cloned()?;
+        runs.sort_by(|a, b| {
+            a.run_index
+                .cmp(&b.run_index)
+                .then(a.started_at.cmp(&b.started_at))
+        });
+        Some(runs)
+    }
+
+    pub async fn get_run(&self, run_id: &str) -> Option<ExecutionRun> {
+        let store = self.store.lock().await;
+        store
+            .runs
+            .values()
+            .flat_map(|runs| runs.iter())
+            .find(|run| run.id == run_id)
+            .cloned()
+    }
+
+    pub async fn list_run_logs(&self, run_id: &str) -> Option<Vec<AgentLog>> {
+        let store = self.store.lock().await;
+        self
+            .get_run_from_store(&store, run_id)
+            .map(|_| ())
+            ?;
+
+        let mut logs = store.logs.get(run_id).cloned().unwrap_or_default();
+        logs.sort_by(|a, b| a.sequence.cmp(&b.sequence));
+        Some(logs)
     }
 
     pub async fn update_task_status(&self, id: &str, status: TaskStatus) {
@@ -1278,6 +1306,16 @@ impl AppState {
                     .await;
             }
         })
+    }
+}
+
+impl AppState {
+    fn get_run_from_store<'a>(&self, store: &'a Store, run_id: &str) -> Option<&'a ExecutionRun> {
+        store
+            .runs
+            .values()
+            .flat_map(|runs| runs.iter())
+            .find(|run| run.id == run_id)
     }
 }
 
