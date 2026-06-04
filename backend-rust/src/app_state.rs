@@ -21,6 +21,7 @@ pub struct AppState {
     pub config: Config,
     store: Arc<Mutex<Store>>,
     pub queue: Arc<Option<crate::queue::TaskQueue>>,
+    pub(crate) health_probe: Arc<crate::health::HealthProbe>,
     event_bus: Arc<TaskEventBus>,
 }
 
@@ -133,8 +134,14 @@ impl AppState {
                 next_seq: 10,
             })),
             queue: Arc::new(None),
+            health_probe: Arc::new(crate::health::HealthProbe::real()),
             event_bus: Arc::new(TaskEventBus::new(256)),
         }
+    }
+
+    pub fn with_health_probe(mut self, health_probe: crate::health::HealthProbe) -> Self {
+        self.health_probe = Arc::new(health_probe);
+        self
     }
 
     pub fn task_events(&self) -> Arc<TaskEventBus> {

@@ -57,6 +57,13 @@ impl Config {
             gemini_api_key,
         }
     }
+
+    pub fn gemini_api_key_configured(&self) -> bool {
+        self.gemini_api_key
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    }
 }
 
 fn parse_allow_origins(raw: &str) -> Vec<String> {
@@ -139,5 +146,20 @@ mod tests {
             ]
         );
         assert!(config.gemini_api_key.is_none());
+    }
+
+    #[test]
+    fn gemini_api_key_configuration_detects_blank_values() {
+        let config = Config {
+            port: 3001,
+            run_seed: false,
+            claude_timeout_secs: 300,
+            default_max_retries: 5,
+            task_concurrency: 2,
+            allow_origins: vec![],
+            gemini_api_key: Some("   ".to_string()),
+        };
+
+        assert!(!config.gemini_api_key_configured());
     }
 }
