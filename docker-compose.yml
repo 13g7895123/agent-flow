@@ -31,6 +31,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Go backend (legacy)
   backend:
     build:
       context: ./backend
@@ -47,6 +48,38 @@ services:
       CLAUDE_TIMEOUT: ${CLAUDE_TIMEOUT:-10m}
       CLAUDE_DEFAULT_MAX_RETRIES: ${CLAUDE_DEFAULT_MAX_RETRIES:-5}
       TASK_CONCURRENCY: ${TASK_CONCURRENCY:-1}
+      ALLOW_ORIGINS: ${ALLOW_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      # 掛載宿主機 home 目錄，讓 claude CLI 能存取本地專案
+      - /home:/home
+      # 掛載 claude config（已登入的帳號）
+      - ${HOME}/.claude:/root/.claude:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - go-backend
+
+  # Rust backend (new)
+  backend-rust-service:
+    build:
+      context: ./backend-rust
+      dockerfile: Dockerfile
+    container_name: agent-flow-backend-rust
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://${POSTGRES_USER:-agent_flow}:${POSTGRES_PASSWORD:-secret}@postgres:5432/${POSTGRES_DB:-agent_flow}
+      REDIS_URL: redis://redis:6379
+      RUN_SEED: ${RUN_SEED:-true}
+      CLAUDE_TIMEOUT_SECS: ${CLAUDE_TIMEOUT_SECS:-300}
+      DEFAULT_MAX_RETRIES: ${DEFAULT_MAX_RETRIES:-5}
+      TASK_CONCURRENCY: ${TASK_CONCURRENCY:-2}
       ALLOW_ORIGINS: ${ALLOW_ORIGINS:-http://localhost:3000,http://localhost:5173}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
