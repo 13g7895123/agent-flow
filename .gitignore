@@ -3,6 +3,12 @@ node_modules/
 web/dist/
 web/.env.local
 
+# Playwright
+web/playwright-report/
+web/test-results/
+web/blob-report/
+web/.auth/
+
 # Rust
 backend-rust/target/
 
