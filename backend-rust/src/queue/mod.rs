@@ -102,24 +102,17 @@ impl TaskWorker {
 }
 
 async fn process_task(state: &crate::AppState, task_id: &str) -> Result<()> {
-    if let Some(mut task) = state.get_task(task_id).await {
-        task.status = crate::domain::TaskStatus::Running;
-        task.updated_at = chrono::Utc::now();
-        state.update_task_status(task_id, task.status.clone()).await;
+    let task = state
+        .get_task(task_id)
+        .await
+        .ok_or_else(|| anyhow!("Task {} not found", task_id))?;
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        task.status = crate::domain::TaskStatus::Done;
-        task.completed_at = Some(chrono::Utc::now());
-        task.updated_at = chrono::Utc::now();
-        state.update_task_status(task_id, task.status.clone()).await;
-        state.set_task_completed(task_id, task.completed_at).await;
-
-        tracing::info!("Task {} completed", task_id);
-        Ok(())
-    } else {
-        Err(anyhow!("Task {} not found", task_id))
+    if task.status.is_terminal() {
+        tracing::info!("Task {} is already terminal, skipping", task_id);
+        return Ok(());
     }
+
+    state.execute_task(task_id).await
 }
 
 #[cfg(test)]
