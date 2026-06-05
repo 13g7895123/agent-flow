@@ -1194,7 +1194,7 @@ pub trait ModelRunner {
 3. 前端 `.env` 改：
 
    ```text
-   VITE_API_URL=http://localhost:3002
+   VITE_API_URL=/api
    ```
 
 4. 完整手動測試：
@@ -1214,7 +1214,7 @@ pub trait ModelRunner {
 
 5. 沒問題後，把 Rust port 改回 3001。
 
-6. 前端預設 API URL 改回主要後端 port，確認不需要本機額外手改即可啟動。
+6. 前端預設 API URL 維持 `/api`，確認不需要本機額外手改即可啟動。
 
 7. Go backend service 移除或標成 legacy。
 
